@@ -62,4 +62,8 @@ int ldb_mdb_msg_store(struct ldb_context *ldb,
 		      struct ldb_message *msg,
 		      int flags);
 
+int ldb_mdb_dn_delete(struct ldb_context *ldb,
+		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
+		      struct ldb_dn *dn);
+
 #endif /* _LDB_MDB_UTIL_H_ */

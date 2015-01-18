@@ -232,3 +232,22 @@ done:
 	ldb_mdb_value_free(&mdb_val);
 	return ret;
 }
+
+int ldb_mdb_dn_delete(struct ldb_context *ldb,
+		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
+		      struct ldb_dn *dn)
+{
+	int ret;
+	MDB_val mdb_key;
+
+	memset(&mdb_key, 0, sizeof(MDB_val));
+	ret = ldb_mdb_dn_to_key(dn, dn, &mdb_key);
+	if (ret != LDB_SUCCESS) {
+		return ret;
+	}
+
+	ret = mdb_del(mdb_txn, mdb_dbi, &mdb_key, NULL);
+	ldb_mdb_key_free(&mdb_key);
+
+	return ldb_mdb_err_map(ret);
+}
