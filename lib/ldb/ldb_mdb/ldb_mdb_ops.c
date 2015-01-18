@@ -102,6 +102,88 @@ done:
 	return ret;
 }
 
+int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
+		   struct ldb_request *req,
+		   struct ldb_delete *del_ctx)
+{
+	struct ldb_context *ldb;
+	struct lmdb_private *lmdb;
+	MDB_env *mdb_env;
+	MDB_val mdb_key;
+	MDB_txn *mdb_txn = NULL;
+	MDB_dbi mdb_dbi = 0;
+	int ret;
+
+	ldb = ldb_tv_get_ldb_ctx(tv_mod);
+	lmdb = ldb_tv_get_mod_data(tv_mod);
+	if (ldb == NULL || lmdb == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	mdb_env = lmdb->env;
+
+	memset(&mdb_key, 0, sizeof(MDB_val));
+	ret = ldb_mdb_dn_to_key(del_ctx->dn, del_ctx->dn, &mdb_key);
+	if (ret != LDB_SUCCESS) {
+		return ret;
+	}
+
+	ret = mdb_txn_begin(mdb_env, NULL, 0, &mdb_txn);
+	if (ret != 0) {
+		ldb_asprintf_errstring(ldb,
+				       "mdb_txn_begin failed: %s\n",
+				       mdb_strerror(ret));
+		goto done;
+	}
+
+	ret = mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi);
+	if (ret != 0) {
+		ldb_asprintf_errstring(ldb,
+				       "mdb_dbi_open failed: %s\n",
+				       mdb_strerror(ret));
+		goto done;
+	}
+
+	ret = mdb_del(mdb_txn, mdb_dbi, &mdb_key, NULL);
+	switch (ret) {
+		case 0:
+			ret = LDB_SUCCESS;
+			break;
+		case MDB_NOTFOUND:
+			ret = LDB_ERR_NO_SUCH_OBJECT;
+			goto done;
+		default:
+			ldb_asprintf_errstring(ldb,
+					       "mdb_put failed: %s\n",
+					       mdb_strerror(ret));
+			goto done;
+	}
+
+	mdb_dbi_close(mdb_env, mdb_dbi);
+	mdb_dbi = 0;
+
+	ret = mdb_txn_commit(mdb_txn);
+	if (ret != 0) {
+		ldb_asprintf_errstring(ldb,
+				       "mdb_txn_commit failed: %s\n",
+				       mdb_strerror(ret));
+		goto done;
+	}
+	mdb_txn = NULL;
+
+	ret = LDB_SUCCESS;
+done:
+	if (mdb_dbi) {
+		mdb_dbi_close(mdb_env, mdb_dbi);
+	}
+
+	if (mdb_txn != NULL) {
+		mdb_txn_abort(mdb_txn);
+	}
+	talloc_free(mdb_key.mv_data);
+	return ret;
+}
+
 static int keyval_matches(struct ldb_context *ldb,
 			  MDB_val mdb_key,
 			  MDB_val mdb_val,

@@ -42,4 +42,8 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 		      struct ldb_request *req,
 		      struct ldb_search *search);
 
+int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
+		   struct ldb_request *req,
+		   struct ldb_delete *del_ctx);
+
 #endif /* _LDB_MDB_PVT_H_ */
