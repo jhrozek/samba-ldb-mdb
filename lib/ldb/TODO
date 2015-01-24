@@ -1,0 +1,22 @@
+- add mappings of LDB flags to MDB flags
+- rename
+- search
+    - attr filtering
+    - only use readonly transactions with search
+- fix sssd sysdb test
+    - use-after-free in modify
+- indexing
+    - warn_unindexed
+- special entries:
+   - BASEINFO
+    - sequence number
+   - ATTRIBUTES
+    - case sensitive
+    - implement check_special_dn
+    - SYNTAX_INTEGER is not that important
+- implement permissive control
+- test failing mdb_put
+- init rootdse + test
+- extended + test
+- use ldb_oom() consistently
+- check all FIXMEs and TODOs
