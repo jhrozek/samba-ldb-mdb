@@ -151,3 +151,46 @@ void ldb_mdb_value_free(MDB_val *value)
 {
 	return free_mdb_val(value);
 }
+
+int ldb_mdb_msg_store(struct ldb_context *ldb,
+		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
+		      struct ldb_message *msg,
+		      int flags)
+{
+	int ret;
+	MDB_val mdb_key;
+	MDB_val mdb_val;
+
+	memset(&mdb_key, 0, sizeof(MDB_val));
+	memset(&mdb_val, 0, sizeof(MDB_val));
+
+	ret = ldb_mdb_dn_to_key(msg, msg->dn, &mdb_key);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(ldb,
+				       "Cannot construct key from %s\n",
+				       ldb_dn_get_linearized(msg->dn));
+		goto done;
+	}
+
+	ret = ldb_mdb_msg_to_value(msg, ldb, msg, &mdb_val);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(ldb, "Cannot construct value from %s\n",
+				       ldb_dn_get_linearized(msg->dn));
+		goto done;
+	}
+
+	ret = mdb_put(mdb_txn, mdb_dbi, &mdb_key, &mdb_val, flags);
+	if (ret != 0) {
+		ldb_asprintf_errstring(ldb,
+				       "mdb_put failed: %s\n",
+				       mdb_strerror(ret));
+		ret = ldb_mdb_err_map(ret);
+		goto done;
+	}
+
+	ret = LDB_SUCCESS;
+done:
+	ldb_mdb_key_free(&mdb_key);
+	ldb_mdb_value_free(&mdb_val);
+	return ret;
+}

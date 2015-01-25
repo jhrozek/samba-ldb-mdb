@@ -52,4 +52,9 @@ int ldb_mdb_msg_to_value(TALLOC_CTX *mem_ctx,
 
 void ldb_mdb_value_free(MDB_val *value);
 
+int ldb_mdb_msg_store(struct ldb_context *ldb,
+		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
+		      struct ldb_message *msg,
+		      int flags);
+
 #endif /* _LDB_MDB_UTIL_H_ */
