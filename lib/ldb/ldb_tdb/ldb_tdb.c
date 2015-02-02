@@ -567,7 +567,6 @@ static int ltdb_msg_add_element(struct ldb_context *ldb,
   delete all elements having a specified attribute name
 */
 static int msg_delete_attribute(struct ldb_module *module,
-				struct ldb_context *ldb,
 				struct ldb_message *msg, const char *name)
 {
 	unsigned int i;
@@ -634,7 +633,7 @@ static int msg_delete_element(struct ldb_module *module,
 		}
 		if (matched) {
 			if (el->num_values == 1) {
-				return msg_delete_attribute(module, ldb, msg, name);
+				return msg_delete_attribute(module, msg, name);
 			}
 
 			ret = ltdb_index_del_value(module, msg->dn, el, i);
@@ -895,7 +894,7 @@ int ltdb_modify_internal(struct ldb_module *module,
 				}
 
 				/* Delete the attribute if it exists in the DB */
-				if (msg_delete_attribute(module, ldb, msg2,
+				if (msg_delete_attribute(module, msg2,
 							 el->name) != 0) {
 					ret = LDB_ERR_OTHER;
 					goto done;
@@ -924,7 +923,7 @@ int ltdb_modify_internal(struct ldb_module *module,
 
 			if (msg->elements[i].num_values == 0) {
 				/* Delete the whole attribute */
-				ret = msg_delete_attribute(module, ldb, msg2,
+				ret = msg_delete_attribute(module, msg2,
 							   msg->elements[i].name);
 				if (ret == LDB_ERR_NO_SUCH_ATTRIBUTE &&
 				    control_permissive) {
