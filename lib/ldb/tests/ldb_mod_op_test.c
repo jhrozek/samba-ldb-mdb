@@ -787,6 +787,41 @@ static void test_ldb_modify_del_keyval(void **state)
 	assert_null(el);
 }
 
+struct search_test_ctx {
+	struct ldbtest_ctx *ldb_test_ctx;
+	struct ldb_message *msg;
+};
+
+# if 0
+static void ldb_search_test_setup(void **state)
+{
+	struct ldbtest_ctx *ldb_test_ctx;
+	struct search_test_ctx *search_test_ctx;
+
+	ldbtest_setup((void **) &ldb_test_ctx);
+
+	search_test_ctx = talloc(ldb_test_ctx, struct search_test_ctx);
+	assert_non_null(search_test_ctx);
+
+	*state = search_test_ctx;
+}
+
+static void ldb_search_test_teardown(void **state)
+{
+	struct search_test_ctx *search_test_ctx = talloc_get_type_abort(*state,
+			struct search_test_ctx);
+	struct ldbtest_ctx *ldb_test_ctx;
+
+	ldb_test_ctx = search_test_ctx->ldb_test_ctx;
+
+	ldbtest_teardown((void **) &ldb_test_ctx);
+}
+
+static void ldb_search_test_attr_all(void **state)
+{
+}
+#endif
+
 int main(int argc, const char **argv)
 {
 	const struct CMUnitTest tests[] = {
