@@ -1,3 +1,5 @@
+- the operations should take the member of union op as argument!
+- lmdb_handle_request() and parts of modify should be made backend-agnostic
 - add mappings of LDB flags to MDB flags
 - rename
 - search

@@ -263,19 +263,15 @@ int ldb_mdb_dn_delete(struct ldb_context *ldb,
 	return ldb_mdb_err_map(ret);
 }
 
-int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
-		    struct ldb_context *ldb,
-		    struct lmdb_db_op *op,
-		    struct ldb_dn *dn,
-		    struct ldb_message **_msg)
+static int ldb_mdb_fill_val(struct ldb_context *ldb,
+			    struct lmdb_db_op *op,
+			    struct ldb_dn *dn,
+			    MDB_val *mdb_val)
 {
 	int ret;
-	MDB_val mdb_val;
 	MDB_val mdb_key;
 	MDB_txn *mdb_txn;
 	MDB_dbi mdb_dbi;
-	struct ldb_val ldb_data;
-	struct ldb_message *msg = NULL;
 
 	mdb_dbi = lmdb_db_op_get_handle(op);
 	mdb_txn = lmdb_db_op_get_tx(op);
@@ -286,13 +282,68 @@ int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
 		return ret;
 	}
 
-	ret = mdb_get(mdb_txn, mdb_dbi, &mdb_key, &mdb_val);
+	ret = mdb_get(mdb_txn, mdb_dbi, &mdb_key, mdb_val);
+	ldb_mdb_key_free(&mdb_key);
 	if (ret != 0) {
 		/* FIXME - ENOENT should be graceful */
 		ldb_asprintf_errstring(ldb,
 				       "mdb_get failed: %s\n",
 				       mdb_strerror(ret));
 		ret = ldb_mdb_err_map(ret);
+		return ret;
+	}
+
+	return LDB_SUCCESS;
+}
+
+int ldb_mdb_val_get(TALLOC_CTX *mem_ctx,
+		    struct ldb_context *ldb,
+		    struct lmdb_db_op *op,
+		    struct ldb_dn *dn,
+		    MDB_val **_mdb_val)
+{
+	int ret;
+	MDB_val *mdb_val = NULL;
+
+	/* FIXME - we might use stack-allocated val and only copy
+	 * if output pointer exists
+	 */
+	mdb_val = talloc_zero(mem_ctx, MDB_val);
+	if (mdb_val == NULL) {
+		ret = ldb_oom(ldb);
+		goto done;
+	}
+
+	ret = ldb_mdb_fill_val(ldb, op, dn, mdb_val);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	if (_mdb_val) {
+		*_mdb_val = mdb_val;
+		mdb_val = NULL;
+	}
+	ret = LDB_SUCCESS;
+done:
+	if (ret != LDB_SUCCESS) {
+		talloc_free(mdb_val);
+	}
+	return ret;
+}
+
+int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
+		    struct ldb_context *ldb,
+		    struct lmdb_db_op *op,
+		    struct ldb_dn *dn,
+		    struct ldb_message **_msg)
+{
+	int ret;
+	MDB_val mdb_val;
+	struct ldb_val ldb_data;
+	struct ldb_message *msg = NULL;
+
+	ret = ldb_mdb_fill_val(ldb, op, dn, &mdb_val);
+	if (ret != LDB_SUCCESS) {
 		goto done;
 	}
 
@@ -315,6 +366,5 @@ int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
 	*_msg = talloc_move(mem_ctx, &msg);
 done:
 	talloc_free(msg);
-	ldb_mdb_key_free(&mdb_key);
 	return ret;
 }

@@ -450,3 +450,102 @@ done:
 	talloc_free(mod_op_ctx);
 	return ret;
 }
+
+int ldb_mdb_rename_op(struct ldb_tv_module *tv_mod,
+		      struct ldb_request *req,
+		      struct ldb_rename *rename_ctx)
+{
+	int ret;
+	struct ldb_context *ldb;
+	struct lmdb_private *lmdb;
+	struct ldb_message *msg = NULL;
+	MDB_val mdb_key;
+	MDB_val mdb_key_old;
+	struct lmdb_db_op *op = NULL;
+
+	memset(&mdb_key, 0, sizeof(MDB_val));
+	memset(&mdb_key_old, 0, sizeof(MDB_val));
+
+	ldb = ldb_tv_get_ldb_ctx(tv_mod);
+	lmdb = ldb_tv_get_mod_data(tv_mod);
+	if (ldb == NULL || lmdb == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	ret = ldb_mdb_dn_to_key(req, rename_ctx->newdn, &mdb_key);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	ret = ldb_mdb_dn_to_key(req, rename_ctx->olddn, &mdb_key_old);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	op = ldb_mdb_op_start(lmdb);
+	if (op == NULL) {
+		goto done;
+	}
+
+	msg = ldb_msg_new(req);
+	if (msg == NULL) {
+		ret = ldb_oom(ldb);
+		goto done;
+	}
+
+	/* we need to fetch the old record to re-add under the new name */
+	ret = ldb_mdb_msg_get(req, ldb, op, rename_ctx->olddn, &msg);
+	if (ret != LDB_SUCCESS) {
+		/* not finding the old record is an error */
+		goto done;
+	}
+
+	/* Only declare a conflict if the new DN already exists,
+	 * and it isn't a case change on the old DN
+	 */
+	if (mdb_key.mv_size != mdb_key_old.mv_size
+		|| memcmp(mdb_key.mv_data,
+			  mdb_key_old.mv_data,
+			  mdb_key.mv_size) != 0) {
+		ret = ldb_mdb_val_get(req, ldb, op, rename_ctx->newdn, NULL);
+		if (ret == LDB_SUCCESS) {
+			ldb_asprintf_errstring(ldb,
+					       "Entry %s already exists",
+				ldb_dn_get_linearized(rename_ctx->newdn));
+			ret = LDB_ERR_ENTRY_ALREADY_EXISTS;
+			goto done;
+		}
+	}
+
+	ret = ldb_mdb_dn_delete(ldb, op, rename_ctx->olddn);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	msg->dn = ldb_dn_copy(msg, req->op.rename.newdn);
+	if (msg->dn == NULL) {
+		ret = ldb_oom(ldb);
+		goto done;
+	}
+
+	ret = ldb_mdb_msg_store(ldb, op, msg, MDB_NOOVERWRITE);
+	if (ret != 0) {
+		goto done;
+	}
+
+	ret = ldb_mdb_op_commit(lmdb, op);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+	op = NULL;
+
+	ret = LDB_SUCCESS;
+done:
+	if (op != NULL) {
+		ldb_mdb_op_cancel(lmdb, op);
+	}
+
+	ldb_mdb_key_free(&mdb_key);
+	ldb_mdb_key_free(&mdb_key_old);
+	return ret;
+}

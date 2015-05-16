@@ -72,6 +72,12 @@ int ldb_mdb_dn_delete(struct ldb_context *ldb,
 		      struct lmdb_db_op *op,
 		      struct ldb_dn *dn);
 
+int ldb_mdb_val_get(TALLOC_CTX *mem_ctx,
+		    struct ldb_context *ldb,
+		    struct lmdb_db_op *op,
+		    struct ldb_dn *dn,
+		    MDB_val **_mdb_val);
+
 int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
 		    struct ldb_context *ldb,
 		    struct lmdb_db_op *op,
