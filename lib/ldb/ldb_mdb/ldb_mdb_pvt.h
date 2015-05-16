@@ -53,6 +53,10 @@ int ldb_mdb_mod_op(struct ldb_tv_module *tv_mod,
                    struct ldb_request *req,
                    struct ldb_modify *mod_ctx);
 
+int ldb_mdb_rename_op(struct ldb_tv_module *tv_mod,
+                      struct ldb_request *req,
+                      struct ldb_rename *rename_ctx);
+
 int ldb_mdb_trans_start(struct ldb_tv_module *tv_mod);
 int ldb_mdb_trans_prepare(struct ldb_tv_module *tv_mod);
 int ldb_mdb_trans_commit(struct ldb_tv_module *tv_mod);

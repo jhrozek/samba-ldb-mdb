@@ -37,6 +37,7 @@ static const struct ldb_tv_ops lmdb_ops = {
 	.add			= ldb_mdb_add_op,
 	.del			= ldb_mdb_del_op,
 	.modify			= ldb_mdb_mod_op,
+	.rename			= ldb_mdb_rename_op,
 
 	.start_transaction	= ldb_mdb_trans_start,
 	.prepare_transaction	= ldb_mdb_trans_prepare,

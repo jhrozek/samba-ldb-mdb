@@ -501,3 +501,14 @@ done:
 	talloc_free(mod_op_ctx);
 	return ret;
 }
+
+int ldb_mdb_rename_op(struct ldb_tv_module *tv_mod,
+                      struct ldb_request *req,
+                      struct ldb_rename *rename_ctx)
+{
+    int ret;
+
+    ret = LDB_SUCCESS;
+done:
+    return ret;
+}
