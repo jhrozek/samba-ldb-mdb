@@ -336,6 +336,12 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 			goto done;
 		}
 
+		msg = ldb_msg_filter_attrs(msg, search->attrs);
+		if (msg == NULL) {
+			ret = ENOMEM;
+			goto done;
+		}
+
 		/* An entry was found */
 		ret = ldb_module_send_entry(req, msg, NULL);
 		if (ret != LDB_SUCCESS) {
