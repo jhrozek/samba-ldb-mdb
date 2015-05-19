@@ -38,4 +38,8 @@ int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 		   struct ldb_request *req,
 		   struct ldb_add *add_ctx);
 
+int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
+		      struct ldb_request *req,
+		      struct ldb_search *search);
+
 #endif /* _LDB_MDB_PVT_H_ */

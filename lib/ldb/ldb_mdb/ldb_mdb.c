@@ -32,13 +32,6 @@
 #define MDB_URL_PREFIX		"mdb://"
 #define MDB_URL_PREFIX_SIZE	(sizeof(MDB_URL_PREFIX)-1)
 
-static int lmdb_search(struct ldb_tv_module *kv_mod,
-		       struct ldb_request *req,
-		       struct ldb_search *search)
-{
-	return LDB_SUCCESS;
-}
-
 static int stub_start_transaction(struct ldb_tv_module *kv_mod)
 {
 	return LDB_SUCCESS;
@@ -60,7 +53,7 @@ static int stub_del_transaction(struct ldb_tv_module *kv_mod)
 }
 
 static const struct ldb_tv_ops lmdb_ops = {
-	.search			= lmdb_search,
+	.search			= ldb_mdb_search_op,
 	.add			= ldb_mdb_add_op,
 
 	.start_transaction	= stub_start_transaction,
