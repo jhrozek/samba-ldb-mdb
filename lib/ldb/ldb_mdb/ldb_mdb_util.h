@@ -50,6 +50,11 @@ int ldb_mdb_msg_to_value(TALLOC_CTX *mem_ctx,
 			 struct ldb_message *msg,
 			 MDB_val *value);
 
+int ldb_mdb_value_to_msg(TALLOC_CTX *mem_ctx,
+			 struct ldb_context *ldb,
+			 MDB_val *value,
+			 struct ldb_message **_msg);
+
 void ldb_mdb_value_free(MDB_val *value);
 
 int ldb_mdb_msg_store(struct ldb_context *ldb,

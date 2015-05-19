@@ -147,6 +147,44 @@ done:
 	return ret;
 }
 
+int ldb_mdb_value_to_msg(TALLOC_CTX *mem_ctx,
+			 struct ldb_context *ldb,
+			 MDB_val *value,
+			 struct ldb_message **_msg)
+{
+	struct ldb_message *msg;
+	struct ldb_val ldb_value;
+	int ret;
+
+	msg = ldb_msg_new(mem_ctx);
+	if (msg == NULL) {
+		return ldb_oom(ldb);
+	}
+
+	ldb_value.length = value->mv_size;
+	ldb_value.data = value->mv_data;
+
+	/* ldb_value allocated on top of mgs */
+	ret = ldb_unpack_data(ldb, &ldb_value, msg);
+	if (ret != 0) {
+		talloc_free(msg);
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	if (msg->dn == NULL) {
+		/* Handles PACKING_FORMAT_NODN */
+		msg->dn = ldb_dn_new(msg, ldb,
+				(char *) value->mv_data + sizeof(DN_PREFIX));
+		if (msg->dn == NULL) {
+			talloc_free(msg);
+			return ldb_oom(ldb);
+		}
+	}
+
+	*_msg = msg;
+	return LDB_SUCCESS;
+}
+
 void ldb_mdb_value_free(MDB_val *value)
 {
 	return free_mdb_val(value);
