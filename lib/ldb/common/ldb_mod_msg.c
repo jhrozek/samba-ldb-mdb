@@ -27,8 +27,10 @@
 #include "ldb_msg_mod.h"
 #include "ldb_private.h"
 
+#define DISTINGUISHED_NAME "distinguishedName"
+
 bool el_single_valued(const struct ldb_schema_attribute *a,
-		      struct ldb_message_element *el)
+			  struct ldb_message_element *el)
 {
 	if (!a) {
 		return false;
@@ -566,4 +568,121 @@ int ldb_msg_modify(struct ldb_context *ldb,
 	}
 
 	return ret;
+}
+
+static struct ldb_message *msg_add_dn(struct ldb_message *msg)
+{
+	int ret;
+
+	ret = ldb_msg_add_linearized_dn(msg, DISTINGUISHED_NAME, msg->dn);
+	if (ret != LDB_SUCCESS) {
+		return NULL;
+	}
+
+	return msg;
+}
+
+static bool attrs_has_dn(const char * const *attrs)
+{
+	unsigned int i;
+
+	for (i = 0; attrs[i]; i++) {
+		if (ldb_attr_cmp(attrs[i], DISTINGUISHED_NAME) == 0) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool attrs_keep_all(const char * const *attrs)
+{
+	unsigned int i;
+
+	if (attrs == NULL) {
+		return true;
+	}
+
+	for (i = 0; attrs[i]; i++) {
+		if (ldb_attr_cmp(attrs[i], "*") == 0) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool include_attr(const char * const *haystack, const char *needle)
+{
+	unsigned int i;
+
+	for (i = 0; haystack[i]; i++) {
+		if (ldb_attr_cmp(needle, haystack[i]) == 0) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static struct ldb_message *filter_elements(struct ldb_message *msg,
+		const char * const *attrs)
+{
+	struct ldb_message_element *new_el;
+	unsigned int num_elements;
+	unsigned int i;
+	bool found_attr;
+
+	new_el = talloc_array(msg, struct ldb_message_element, msg->num_elements);
+	if (new_el == NULL) {
+		return NULL;
+	}
+
+	num_elements = 0;
+	for (i = 0; i < msg->num_elements; i++) {
+		/* We could use the standard ldb_msg_remove_attr() but this is
+		 * faster, see samba commit eaabb595
+		 */
+		found_attr = include_attr(attrs, msg->elements[i].name);
+		if (found_attr == true) {
+			new_el[num_elements] = msg->elements[i];
+			talloc_steal(new_el, new_el[num_elements].name);
+			talloc_steal(new_el, new_el[num_elements].values);
+			num_elements++;
+		}
+	}
+
+	talloc_free(msg->elements);
+	/* FIXME - is num_elements correct here? Test when no attributes match */
+	msg->elements = talloc_realloc(msg, new_el,
+				       struct ldb_message_element,
+				       num_elements);
+	if (msg->elements == NULL && num_elements > 0) {
+		return NULL;
+	}
+	msg->num_elements = num_elements;
+
+	return msg;
+}
+
+struct ldb_message *ldb_msg_filter_attrs(struct ldb_message *msg,
+				         const char * const *attrs)
+{
+	bool keep_all;
+	bool include_dn;
+
+	keep_all = attrs_keep_all(attrs);
+	if (keep_all == true) {
+		return msg_add_dn(msg);
+	}
+
+	include_dn = attrs_has_dn(attrs);
+	if (include_dn) {
+		msg = msg_add_dn(msg);
+		if (msg == NULL) {
+			return NULL;
+		}
+	}
+
+	return filter_elements(msg, attrs);
 }
