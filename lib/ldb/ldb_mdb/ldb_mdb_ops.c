@@ -258,7 +258,7 @@ static int keyval_matches(struct ldb_context *ldb,
 		/* Handles PACKING_FORMAT_NODN */
 		msg->dn = ldb_dn_new(msg, ldb, (char *) mdb_key.mv_data + 3);
 		if (msg->dn == NULL) {
-			return ENOMEM;
+			return ldb_oom(ldb);
 		}
 	}
 
@@ -318,7 +318,7 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 
 	msg = ldb_msg_new(req);
 	if (msg == NULL) {
-		ret = ENOMEM;
+		ret = ldb_oom(ldb);
 		goto done;
 	}
 
@@ -335,6 +335,12 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 			goto done;
 		}
 
+		msg = ldb_msg_filter_attrs(msg, search->attrs);
+		if (msg == NULL) {
+			ret = ldb_oom(ldb);
+			goto done;
+		}
+
 		/* An entry was found */
 		ret = ldb_module_send_entry(req, msg, NULL);
 		if (ret != LDB_SUCCESS) {
@@ -347,7 +353,7 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 		/* msg is now owned by the caller */
 		msg = ldb_msg_new(req);
 		if (msg == NULL) {
-			ret = ENOMEM;
+			ret = ldb_oom(ldb);
 			goto done;
 		}
 	}
