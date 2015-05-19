@@ -39,8 +39,33 @@ static int lmdb_search(struct ldb_tv_module *kv_mod,
 	return LDB_SUCCESS;
 }
 
+static int stub_start_transaction(struct ldb_tv_module *kv_mod)
+{
+	return LDB_SUCCESS;
+}
+
+static int stub_prepare_transaction(struct ldb_tv_module *kv_mod)
+{
+	return LDB_SUCCESS;
+}
+
+static int stub_end_transaction(struct ldb_tv_module *kv_mod)
+{
+	return LDB_SUCCESS;
+}
+
+static int stub_del_transaction(struct ldb_tv_module *kv_mod)
+{
+	return LDB_SUCCESS;
+}
+
 static const struct ldb_tv_ops lmdb_ops = {
-	.search            = lmdb_search,
+	.search			= lmdb_search,
+
+	.start_transaction	= stub_start_transaction,
+	.prepare_transaction	= stub_prepare_transaction,
+	.end_transaction	= stub_end_transaction,
+	.del_transaction	= stub_del_transaction,
 };
 
 static int lmdb_pvt_destructor(struct lmdb_private *lmdb)
