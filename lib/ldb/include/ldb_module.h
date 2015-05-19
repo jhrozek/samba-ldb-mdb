@@ -382,4 +382,15 @@ struct ldb_extended_match_rule
 int ldb_register_extended_match_rule(struct ldb_context *ldb,
 				     const struct ldb_extended_match_rule *rule);
 
+/* The following definitions are from the ldb_mod_msg.c file */
+
+/* Iterates through elements of mod_msg provided by the user and updates
+ * db_msg accordingly.
+ *
+ * Returns LDB_SUCCESS on success, an error code otherwise.
+ */
+int ldb_msg_modify(struct ldb_context *ldb,
+		   const struct ldb_message *mod_msg,
+		   struct ldb_message *db_msg);
+
 #endif
