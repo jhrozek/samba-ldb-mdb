@@ -24,10 +24,18 @@
 #ifndef _LDB_MDB_PVT_H_
 #define _LDB_MDB_PVT_H_
 
+#include <lmdb.h>
+
 #include "ldb_private.h"
+#include "ldb_tev_wrap.h"
 
 struct lmdb_private {
 	MDB_env *env;
 };
+
+/* == Module operations == */
+int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
+		   struct ldb_request *req,
+		   struct ldb_add *add_ctx);
 
 #endif /* _LDB_MDB_PVT_H_ */

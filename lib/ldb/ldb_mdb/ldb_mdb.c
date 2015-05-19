@@ -61,6 +61,7 @@ static int stub_del_transaction(struct ldb_tv_module *kv_mod)
 
 static const struct ldb_tv_ops lmdb_ops = {
 	.search			= lmdb_search,
+	.add			= ldb_mdb_add_op,
 
 	.start_transaction	= stub_start_transaction,
 	.prepare_transaction	= stub_prepare_transaction,
