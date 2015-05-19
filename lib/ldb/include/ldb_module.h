@@ -436,4 +436,15 @@ int ldb_unpack_data_only_attr_list_flags(struct ldb_context *ldb,
 #define LDB_UNPACK_DATA_FLAG_NO_DN           0x0002
 #define LDB_UNPACK_DATA_FLAG_NO_VALUES_ALLOC 0x0004
 
+/* The following definitions are from the ldb_mod_msg.c file */
+
+/* Iterates through elements of mod_msg provided by the user and updates
+ * db_msg accordingly.
+ *
+ * Returns LDB_SUCCESS on success, an error code otherwise.
+ */
+int ldb_msg_modify(struct ldb_context *ldb,
+		   const struct ldb_message *mod_msg,
+		   struct ldb_message *db_msg);
+
 #endif
