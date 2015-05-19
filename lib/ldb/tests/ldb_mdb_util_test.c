@@ -56,7 +56,8 @@ struct ldb_mdb_util_test_ctx {
 	struct ldb_context *ldb;
 };
 
-static int ldb_mdb_util_test_setup(void **state)
+static struct ldb_mdb_util_test_ctx *
+ldb_mdb_util_test_ctx_new(TALLOC_CTX *mem_ctx)
 {
 	struct ldb_mdb_util_test_ctx *test_ctx;
 
@@ -68,6 +69,15 @@ static int ldb_mdb_util_test_setup(void **state)
 
 	test_ctx->ldb = ldb_init(test_ctx, test_ctx->ev);
 	assert_non_null(test_ctx->ldb);
+
+	return test_ctx;
+}
+
+static int ldb_mdb_util_test_setup(void **state)
+{
+	struct ldb_mdb_util_test_ctx *test_ctx;
+
+	test_ctx = ldb_mdb_util_test_ctx_new(NULL);
 	*state = test_ctx;
 	return 0;
 }
@@ -517,6 +527,207 @@ static void test_del_element_value(void **state)
 	talloc_free(mem_ctx);
 }
 
+static struct ldb_message *prep_filter_msg(TALLOC_CTX *mem_ctx,
+					   struct ldb_context *ldb)
+{
+	struct ldb_message *msg;
+	int rv;
+
+	msg = ldb_msg_new(mem_ctx);
+	assert_non_null(msg);
+
+	msg->dn = ldb_dn_new_fmt(msg, ldb, "dc=test");
+	assert_non_null(msg->dn);
+
+	rv = ldb_msg_add_string(msg, "cn", "test_cn_val1");
+	assert_int_equal(rv, LDB_SUCCESS);
+	rv = ldb_msg_add_string(msg, "cn", "test_cn_val2");
+	assert_int_equal(rv, LDB_SUCCESS);
+
+	rv = ldb_msg_add_string(msg, "uid", "test_uid_val1");
+	assert_int_equal(rv, LDB_SUCCESS);
+	rv = ldb_msg_add_string(msg, "uid", "test_uid_val2");
+	assert_int_equal(rv, LDB_SUCCESS);
+
+	return msg;
+}
+
+static void assert_both_cn(struct ldb_message *msg)
+{
+	struct ldb_message_element *cn;
+
+	cn = ldb_msg_find_element(msg, "cn");
+	assert_non_null(cn);
+
+	assert_int_equal(cn->num_values, 2);
+	assert_string_equal(cn->values[0].data, "test_cn_val1");
+	assert_string_equal(cn->values[1].data, "test_cn_val2");
+}
+
+static void assert_no_cn(struct ldb_message *msg)
+{
+	struct ldb_message_element *cn;
+
+	cn = ldb_msg_find_element(msg, "cn");
+	assert_null(cn);
+}
+
+static void assert_both_uid(struct ldb_message *msg)
+{
+	struct ldb_message_element *uid;
+
+	uid = ldb_msg_find_element(msg, "uid");
+	assert_non_null(uid);
+
+	assert_int_equal(uid->num_values, 2);
+	assert_string_equal(uid->values[0].data, "test_uid_val1");
+	assert_string_equal(uid->values[1].data, "test_uid_val2");
+}
+
+static void assert_no_uid(struct ldb_message *msg)
+{
+	struct ldb_message_element *uid;
+
+	uid = ldb_msg_find_element(msg, "uid");
+	assert_null(uid);
+}
+
+static void assert_no_dn(struct ldb_message *msg)
+{
+	struct ldb_message_element *dn;
+
+	dn = ldb_msg_find_element(msg, "distinguishedName");
+	assert_null(dn);
+}
+
+static void assert_dn(struct ldb_message *msg)
+{
+	struct ldb_message_element *dn;
+
+	dn = ldb_msg_find_element(msg, "distinguishedName");
+	assert_non_null(dn);
+
+	assert_int_equal(dn->num_values, 1);
+	assert_string_equal(dn->values[0].data, "dc=test");
+}
+
+struct msg_filter_test_ctx {
+	struct ldb_message *msg;
+	struct ldb_mdb_util_test_ctx *test_ctx;
+};
+
+static int setup_msg_filter_attrs(void **state)
+{
+	struct msg_filter_test_ctx *msg_test_ctx;
+
+	msg_test_ctx = talloc_zero(NULL, struct msg_filter_test_ctx);
+	assert_non_null(msg_test_ctx);
+
+	msg_test_ctx->test_ctx = ldb_mdb_util_test_ctx_new(msg_test_ctx);
+	assert_non_null(msg_test_ctx->test_ctx);
+
+	msg_test_ctx->msg = prep_filter_msg(msg_test_ctx,
+			msg_test_ctx->test_ctx->ldb);
+	assert_non_null(msg_test_ctx->msg);
+	assert_both_cn(msg_test_ctx->msg);
+
+	*state = msg_test_ctx;
+	return 0;
+}
+
+static int teardown_msg_filter_attrs(void **state)
+{
+	struct msg_filter_test_ctx *msg_filter_test_ctx = \
+			talloc_get_type_abort(*state,
+						struct msg_filter_test_ctx);
+
+	talloc_free(msg_filter_test_ctx);
+	return 0;
+}
+
+static void test_msg_filter_attrs_null(void **state)
+{
+	struct msg_filter_test_ctx *msg_filter_test_ctx = \
+			talloc_get_type_abort(*state,
+						struct msg_filter_test_ctx);
+
+	struct ldb_message *msg;
+
+	msg = ldb_msg_filter_attrs(msg_filter_test_ctx->msg, NULL);
+	assert_non_null(msg);
+	assert_both_cn(msg);
+	assert_both_uid(msg);
+	assert_dn(msg);
+}
+
+static void test_msg_filter_attrs_all(void **state)
+{
+	struct msg_filter_test_ctx *msg_filter_test_ctx = \
+			talloc_get_type_abort(*state,
+						struct msg_filter_test_ctx);
+
+	struct ldb_message *msg;
+	const char *attr_all[] = { "*", NULL };
+
+	msg = ldb_msg_filter_attrs(msg_filter_test_ctx->msg, attr_all);
+	assert_non_null(msg);
+	assert_both_cn(msg);
+	assert_both_uid(msg);
+	assert_dn(msg);
+	talloc_free(msg);
+}
+
+static void test_msg_filter_attrs_cn(void **state)
+{
+	struct msg_filter_test_ctx *msg_filter_test_ctx = \
+			talloc_get_type_abort(*state,
+						struct msg_filter_test_ctx);
+
+	struct ldb_message *msg;
+	const char *attr_cn[] = { "cn", NULL };
+
+	msg = ldb_msg_filter_attrs(msg_filter_test_ctx->msg, attr_cn);
+	assert_non_null(msg);
+	assert_both_cn(msg);
+	assert_no_uid(msg);
+	assert_no_dn(msg);
+	talloc_free(msg);
+}
+
+static void test_msg_filter_attrs_cn_dn(void **state)
+{
+	struct msg_filter_test_ctx *msg_filter_test_ctx = \
+			talloc_get_type_abort(*state,
+						struct msg_filter_test_ctx);
+
+	struct ldb_message *msg;
+	const char *attr_cn_dn[] = { "cn", "distinguishedName", NULL };
+
+	msg = ldb_msg_filter_attrs(msg_filter_test_ctx->msg, attr_cn_dn);
+	assert_non_null(msg);
+	assert_both_cn(msg);
+	assert_no_uid(msg);
+	assert_dn(msg);
+	talloc_free(msg);
+}
+
+static void test_msg_filter_attrs_nomatch(void **state)
+{
+	struct msg_filter_test_ctx *msg_filter_test_ctx = \
+			talloc_get_type_abort(*state,
+						struct msg_filter_test_ctx);
+
+	struct ldb_message *msg;
+	const char *attrs_nomatch[] = { "gecos", NULL };
+
+	msg = ldb_msg_filter_attrs(msg_filter_test_ctx->msg, attrs_nomatch);
+	assert_non_null(msg);
+	assert_no_cn(msg);
+	assert_no_uid(msg);
+	assert_no_dn(msg);
+	talloc_free(msg);
+}
+
 int main(int argc, const char **argv)
 {
 	const struct CMUnitTest tests[] = {
@@ -537,6 +748,21 @@ int main(int argc, const char **argv)
 						ldb_mdb_util_test_teardown),
 		cmocka_unit_test(test_filter_duplicates),
 		cmocka_unit_test(test_el_shallow_copy),
+		cmocka_unit_test_setup_teardown(test_msg_filter_attrs_null,
+						setup_msg_filter_attrs,
+						teardown_msg_filter_attrs),
+		cmocka_unit_test_setup_teardown(test_msg_filter_attrs_all,
+						setup_msg_filter_attrs,
+						teardown_msg_filter_attrs),
+		cmocka_unit_test_setup_teardown(test_msg_filter_attrs_cn,
+						setup_msg_filter_attrs,
+						teardown_msg_filter_attrs),
+		cmocka_unit_test_setup_teardown(test_msg_filter_attrs_cn_dn,
+						setup_msg_filter_attrs,
+						teardown_msg_filter_attrs),
+		cmocka_unit_test_setup_teardown(test_msg_filter_attrs_nomatch,
+						setup_msg_filter_attrs,
+						teardown_msg_filter_attrs),
 	};
 
 	return cmocka_run_group_tests(tests, NULL, NULL);
