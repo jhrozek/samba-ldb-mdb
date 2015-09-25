@@ -27,6 +27,7 @@
 #include <lmdb.h>
 
 #include "ldb_private.h"
+#include "ldb_mdb_pvt.h"
 /* We need the discard_const() macros */
 #include "replace.h"
 
@@ -58,5 +59,12 @@ int ldb_mdb_msg_store(struct ldb_context *ldb,
 		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
 		      struct ldb_message *msg,
 		      int flags);
+
+/* internal transaction API */
+int lmdb_private_trans_start(struct lmdb_private *lmdb);
+int lmdb_private_trans_commit(struct lmdb_private *lmdb);
+int lmdb_private_trans_cancel(struct lmdb_private *lmdb);
+struct lmdb_trans *lmdb_private_trans_head(struct lmdb_private *lmdb);
+MDB_txn *lmdb_trans_get_tx(struct lmdb_trans *ltx);
 
 #endif /* _LDB_MDB_UTIL_H_ */

@@ -28,6 +28,47 @@
 #include "ldb_mdb_pvt.h"
 #include "ldb_mdb_util.h"
 
+int ldb_mdb_trans_start(struct ldb_tv_module *tv_mod)
+{
+    struct lmdb_private *lmdb;
+
+    lmdb = ldb_tv_get_mod_data(tv_mod);
+    if (lmdb == NULL) {
+        return LDB_ERR_OPERATIONS_ERROR;
+    }
+
+    return lmdb_private_trans_start(lmdb);
+}
+
+int ldb_mdb_trans_prepare(struct ldb_tv_module *tv_mod)
+{
+    return LDB_SUCCESS;
+}
+
+int ldb_mdb_trans_commit(struct ldb_tv_module *tv_mod)
+{
+    struct lmdb_private *lmdb;
+
+    lmdb = ldb_tv_get_mod_data(tv_mod);
+    if (lmdb == NULL) {
+        return LDB_ERR_OPERATIONS_ERROR;
+    }
+
+    return lmdb_private_trans_commit(lmdb);
+}
+
+int ldb_mdb_trans_cancel(struct ldb_tv_module *tv_mod)
+{
+    struct lmdb_private *lmdb;
+
+    lmdb = ldb_tv_get_mod_data(tv_mod);
+    if (lmdb == NULL) {
+        return LDB_ERR_OPERATIONS_ERROR;
+    }
+
+    return lmdb_private_trans_cancel(lmdb);
+}
+
 /* Does it make sense to pass the request as an ephemeral memory context? */
 int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 		   struct ldb_request *req,
@@ -35,6 +76,7 @@ int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 {
 	struct lmdb_private *lmdb;
 	struct ldb_context *ldb;
+	struct lmdb_trans *ltx;
 	MDB_env *mdb_env;
 	MDB_dbi mdb_dbi = 0;
 	MDB_txn *mdb_txn = NULL;
@@ -54,13 +96,15 @@ int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 	/* FIXME - verify dbi handles are > 0, else use a struct with a bool is_dbi_open */
 	mdb_dbi = 0;
 
-	ret = mdb_txn_begin(mdb_env, NULL, 0, &mdb_txn);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_begin failed: %s\n",
-				       mdb_strerror(ret));
+	ret = ldb_mdb_trans_start(tv_mod);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(ldb, "Cannot construct key from %s\n",
+				       ldb_dn_get_linearized(add_ctx->message->dn));
 		goto done;
 	}
+
+	ltx = lmdb_private_trans_head(lmdb);
+	mdb_txn = lmdb_trans_get_tx(ltx);
 
 	ret = mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi);
 	if (ret != 0) {
@@ -80,11 +124,8 @@ int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 	mdb_dbi_close(mdb_env, mdb_dbi);
 	mdb_dbi = 0;
 
-	ret = mdb_txn_commit(mdb_txn);
+	ret = ldb_mdb_trans_commit(tv_mod);
 	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_commit failed: %s\n",
-				       mdb_strerror(ret));
 		goto done;
 	}
 	mdb_txn = NULL;
@@ -96,7 +137,7 @@ done:
 	}
 
 	if (mdb_txn != NULL) {
-		mdb_txn_abort(mdb_txn);
+		ldb_mdb_trans_cancel(tv_mod);
 	}
 
 	return ret;
@@ -108,6 +149,7 @@ int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
 {
 	struct ldb_context *ldb;
 	struct lmdb_private *lmdb;
+	struct lmdb_trans *ltx;
 	MDB_env *mdb_env;
 	MDB_val mdb_key;
 	MDB_txn *mdb_txn = NULL;
@@ -128,13 +170,13 @@ int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
 		return ret;
 	}
 
-	ret = mdb_txn_begin(mdb_env, NULL, 0, &mdb_txn);
+	ret = ldb_mdb_trans_start(tv_mod);
 	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_begin failed: %s\n",
-				       mdb_strerror(ret));
 		goto done;
 	}
+
+	ltx = lmdb_private_trans_head(lmdb);
+	mdb_txn = lmdb_trans_get_tx(ltx);
 
 	ret = mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi);
 	if (ret != 0) {
@@ -162,11 +204,8 @@ int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
 	mdb_dbi_close(mdb_env, mdb_dbi);
 	mdb_dbi = 0;
 
-	ret = mdb_txn_commit(mdb_txn);
+	ret = ldb_mdb_trans_commit(tv_mod);
 	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_commit failed: %s\n",
-				       mdb_strerror(ret));
 		goto done;
 	}
 	mdb_txn = NULL;
@@ -178,7 +217,7 @@ done:
 	}
 
 	if (mdb_txn != NULL) {
-		mdb_txn_abort(mdb_txn);
+		ldb_mdb_trans_cancel(tv_mod);
 	}
 	talloc_free(mdb_key.mv_data);
 	return ret;
@@ -242,6 +281,7 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 	MDB_val mdb_key;
 	MDB_val mdb_val;
 	MDB_cursor *cursor = NULL;
+	struct lmdb_trans *ltx;
 
 	ldb = ldb_tv_get_ldb_ctx(tv_mod);
 	lmdb = ldb_tv_get_mod_data(tv_mod);
@@ -250,13 +290,13 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 	}
 	mdb_env = lmdb->env;
 
-	ret = mdb_txn_begin(mdb_env, NULL, MDB_RDONLY, &mdb_txn);
+	/* FIXME - readonly transaction! */
+	ret = ldb_mdb_trans_start(tv_mod);
 	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_begin failed: %s\n",
-				       mdb_strerror(ret));
 		goto done;
 	}
+	ltx = lmdb_private_trans_head(lmdb);
+	mdb_txn = lmdb_trans_get_tx(ltx);
 
 	ret = mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi);
 	if (ret != 0) {
@@ -329,7 +369,7 @@ done:
 	}
 
 	if (mdb_txn != NULL) {
-		mdb_txn_commit(mdb_txn);
+		ldb_mdb_trans_commit(tv_mod);
 	}
 	return ret;
 }
