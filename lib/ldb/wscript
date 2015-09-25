@@ -120,7 +120,7 @@ def build(bld):
                      subsystem='ldb')
 
     LDB_MDB_SRC = bld.SUBDIR('ldb_mdb',
-                             'ldb_mdb.c ldb_mdb_util.c ldb_mdb_ops.c')
+                             'ldb_mdb.c ldb_mdb_util.c ldb_mdb_trans.c ldb_mdb_ops.c')
     bld.SAMBA_MODULE('ldb_mdb',
                      LDB_MDB_SRC,
                      init_function='ldb_mdb_init',

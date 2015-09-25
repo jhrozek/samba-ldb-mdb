@@ -30,7 +30,10 @@
 #include "ldb_tev_wrap.h"
 
 struct lmdb_private {
+	struct ldb_context *ldb; // Do we need this member to be visible??
 	MDB_env *env;
+
+	struct lmdb_trans *txlist;
 };
 
 /* == Module operations == */
@@ -46,4 +49,8 @@ int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
 		   struct ldb_request *req,
 		   struct ldb_delete *del_ctx);
 
+int ldb_mdb_trans_start(struct ldb_tv_module *tv_mod);
+int ldb_mdb_trans_prepare(struct ldb_tv_module *tv_mod);
+int ldb_mdb_trans_commit(struct ldb_tv_module *tv_mod);
+int ldb_mdb_trans_cancel(struct ldb_tv_module *tv_mod);
 #endif /* _LDB_MDB_PVT_H_ */

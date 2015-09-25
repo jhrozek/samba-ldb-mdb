@@ -28,6 +28,122 @@
 #include "ldb_mdb_pvt.h"
 #include "ldb_mdb_util.h"
 
+/* Transaction API to be used by LDB users. Hooks into the ldb_tv_
+ * interface
+ */
+int ldb_mdb_trans_start(struct ldb_tv_module *tv_mod)
+{
+	struct lmdb_private *lmdb;
+
+	lmdb = ldb_tv_get_mod_data(tv_mod);
+	if (lmdb == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	return lmdb_private_trans_start(lmdb);
+}
+
+int ldb_mdb_trans_prepare(struct ldb_tv_module *tv_mod)
+{
+	return LDB_SUCCESS;
+}
+
+int ldb_mdb_trans_commit(struct ldb_tv_module *tv_mod)
+{
+	struct lmdb_private *lmdb;
+
+	lmdb = ldb_tv_get_mod_data(tv_mod);
+	if (lmdb == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	return lmdb_private_trans_commit(lmdb);
+}
+
+int ldb_mdb_trans_cancel(struct ldb_tv_module *tv_mod)
+{
+	struct lmdb_private *lmdb;
+
+	lmdb = ldb_tv_get_mod_data(tv_mod);
+	if (lmdb == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	return lmdb_private_trans_cancel(lmdb);
+}
+
+/* Helpers to manage transactions and main db handles at the same time */
+static struct lmdb_db_op *ldb_mdb_op_start(struct lmdb_private *lmdb)
+{
+	int ret;
+	struct lmdb_trans *ltx;
+
+	ret = lmdb_private_trans_start(lmdb);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot start transaction\n");
+		return NULL;
+	}
+
+	ltx = lmdb_private_trans_head(lmdb);
+	if (ltx == NULL) {
+		/* Huh? Try to roll back..*/
+		lmdb_private_trans_cancel(lmdb);
+		return NULL;
+	}
+
+	ret = lmdb_db_op_start(ltx);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot start db operation\n");
+		lmdb_private_trans_cancel(lmdb);
+		return NULL;
+	}
+
+	return lmdb_db_op_get(ltx);
+}
+
+static int ldb_mdb_op_commit(struct lmdb_private *lmdb,
+			     struct lmdb_db_op *op)
+{
+	int ret;
+
+	ret = lmdb_db_op_finish(op);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot finish db operation\n");
+		lmdb_private_trans_cancel(lmdb);
+		return ret;
+	}
+
+	ret = lmdb_private_trans_commit(lmdb);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot commit db transaction\n");
+		lmdb_private_trans_cancel(lmdb);
+		return ret;
+	}
+
+	return LDB_SUCCESS;
+}
+
+static int ldb_mdb_op_cancel(struct lmdb_private *lmdb,
+			     struct lmdb_db_op *op)
+{
+	int ret;
+
+	ret = lmdb_db_op_finish(op);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot finish db operation\n");
+		lmdb_private_trans_cancel(lmdb);
+		return ret;
+	}
+
+	ret = lmdb_private_trans_cancel(lmdb);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot cancel db transaction\n");
+		return ret;
+	}
+
+	return LDB_SUCCESS;
+}
+
 /* Does it make sense to pass the request as an ephemeral memory context? */
 int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 		   struct ldb_request *req,
@@ -35,10 +151,8 @@ int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 {
 	struct lmdb_private *lmdb;
 	struct ldb_context *ldb;
-	MDB_env *mdb_env;
-	MDB_dbi mdb_dbi = 0;
-	MDB_txn *mdb_txn = NULL;
 	int ret;
+	struct lmdb_db_op *op = NULL;
 
 	if (tv_mod == NULL || req == NULL || add_ctx == NULL) {
 		return LDB_ERR_OPERATIONS_ERROR;
@@ -49,56 +163,30 @@ int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 	if (ldb == NULL || lmdb == NULL) {
 		return LDB_ERR_OPERATIONS_ERROR;
 	}
-	mdb_env = lmdb->env;
 
-	mdb_dbi = 0;
-
-	ret = mdb_txn_begin(mdb_env, NULL, 0, &mdb_txn);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_begin failed: %s\n",
-				       mdb_strerror(ret));
-		ret = ldb_mdb_err_map(ret);
-		goto done;
+	op = ldb_mdb_op_start(lmdb);
+	if (op == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
 	}
 
-	ret = mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_dbi_open failed: %s\n",
-				       mdb_strerror(ret));
-		ret = ldb_mdb_err_map(ret);
-		goto done;
-	}
-
-	ret = ldb_mdb_msg_store(ldb, mdb_txn, mdb_dbi,
+	ret = ldb_mdb_msg_store(ldb,
+				op,
 				add_ctx->message,
 				MDB_NOOVERWRITE);
 	if (ret != 0) {
 		goto done;
 	}
 
-	mdb_dbi_close(mdb_env, mdb_dbi);
-	mdb_dbi = 0;
-
-	ret = mdb_txn_commit(mdb_txn);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_commit failed: %s\n",
-				       mdb_strerror(ret));
-		ret = ldb_mdb_err_map(ret);
+	ret = ldb_mdb_op_commit(lmdb, op);
+	if (ret != LDB_SUCCESS) {
 		goto done;
 	}
-	mdb_txn = NULL;
+	op = NULL;
 
 	ret = LDB_SUCCESS;
 done:
-	if (mdb_dbi) {
-		mdb_dbi_close(mdb_env, mdb_dbi);
-	}
-
-	if (mdb_txn != NULL) {
-		mdb_txn_abort(mdb_txn);
+	if (op != NULL) {
+		ldb_mdb_op_cancel(lmdb, op);
 	}
 
 	return ret;
@@ -110,10 +198,8 @@ int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
 {
 	struct ldb_context *ldb;
 	struct lmdb_private *lmdb;
-	MDB_env *mdb_env;
-	MDB_txn *mdb_txn = NULL;
-	MDB_dbi mdb_dbi = 0;
 	int ret;
+	struct lmdb_db_op *op = NULL;
 
 	ldb = ldb_tv_get_ldb_ctx(tv_mod);
 	lmdb = ldb_tv_get_mod_data(tv_mod);
@@ -121,53 +207,28 @@ int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
 		return LDB_ERR_OPERATIONS_ERROR;
 	}
 
-	mdb_env = lmdb->env;
-
-	ret = mdb_txn_begin(mdb_env, NULL, 0, &mdb_txn);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_begin failed: %s\n",
-				       mdb_strerror(ret));
-		ret = ldb_mdb_err_map(ret);
-		goto done;
+	op = ldb_mdb_op_start(lmdb);
+	if (op == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
 	}
 
-	ret = mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_dbi_open failed: %s\n",
-				       mdb_strerror(ret));
-		ret = ldb_mdb_err_map(ret);
-		goto done;
-	}
-
-	ret = ldb_mdb_dn_delete(ldb, mdb_txn, mdb_dbi, del_ctx->dn);
+	ret = ldb_mdb_dn_delete(ldb, op, del_ctx->dn);
 	if (ret != LDB_SUCCESS) {
 		goto done;
 	}
 
-	mdb_dbi_close(mdb_env, mdb_dbi);
-	mdb_dbi = 0;
-
-	ret = mdb_txn_commit(mdb_txn);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_commit failed: %s\n",
-				       mdb_strerror(ret));
-		ret = ldb_mdb_err_map(ret);
+	ret = ldb_mdb_op_commit(lmdb, op);
+	if (ret != LDB_SUCCESS) {
 		goto done;
 	}
-	mdb_txn = NULL;
+	op = NULL;
 
 	ret = LDB_SUCCESS;
 done:
-	if (mdb_dbi) {
-		mdb_dbi_close(mdb_env, mdb_dbi);
+	if (op != NULL) {
+		ldb_mdb_op_cancel(lmdb, op);
 	}
 
-	if (mdb_txn != NULL) {
-		mdb_txn_abort(mdb_txn);
-	}
 	return ret;
 }
 
@@ -224,36 +285,24 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 	int ret;
 	struct lmdb_private *lmdb;
 	MDB_txn *mdb_txn = NULL;
-	MDB_env *mdb_env;
 	MDB_dbi mdb_dbi = 0;
 	MDB_val mdb_key;
 	MDB_val mdb_val;
 	MDB_cursor *cursor = NULL;
+	struct lmdb_db_op *op = NULL;
 
 	ldb = ldb_tv_get_ldb_ctx(tv_mod);
 	lmdb = ldb_tv_get_mod_data(tv_mod);
 	if (ldb == NULL || lmdb == NULL) {
 		return LDB_ERR_OPERATIONS_ERROR;
 	}
-	mdb_env = lmdb->env;
 
-	ret = mdb_txn_begin(mdb_env, NULL, MDB_RDONLY, &mdb_txn);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_txn_begin failed: %s\n",
-				       mdb_strerror(ret));
-		ret = ldb_mdb_err_map(ret);
-		goto done;
+	op = ldb_mdb_op_start(lmdb);
+	if (op == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
 	}
-
-	ret = mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi);
-	if (ret != 0) {
-		ldb_asprintf_errstring(ldb,
-				       "mdb_dbi_open failed: %s\n",
-				       mdb_strerror(ret));
-		ret = ldb_mdb_err_map(ret);
-		goto done;
-	}
+	mdb_dbi = lmdb_db_op_get_handle(op);
+	mdb_txn = lmdb_db_op_get_tx(op);
 
 	/* FIXME - might not need cursor at all. Might just use mdb_get. Need to
 	 * check implementation
@@ -307,18 +356,22 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 		ret = ldb_mdb_err_map(ret);
 		goto done;
 	}
+
+	ret = ldb_mdb_op_commit(lmdb, op);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+	op = NULL;
+
 	ret = LDB_SUCCESS;
 done:
 	if (cursor) {
 		mdb_cursor_close(cursor);
 	}
 
-	if (mdb_dbi) {
-		mdb_dbi_close(mdb_env, mdb_dbi);
+	if (op != NULL) {
+		ldb_mdb_op_cancel(lmdb, op);
 	}
 
-	if (mdb_txn != NULL) {
-		mdb_txn_commit(mdb_txn);
-	}
 	return ret;
 }

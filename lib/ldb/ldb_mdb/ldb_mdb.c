@@ -32,35 +32,15 @@
 #define MDB_URL_PREFIX		"mdb://"
 #define MDB_URL_PREFIX_SIZE	(sizeof(MDB_URL_PREFIX)-1)
 
-static int stub_start_transaction(struct ldb_tv_module *kv_mod)
-{
-	return LDB_SUCCESS;
-}
-
-static int stub_prepare_transaction(struct ldb_tv_module *kv_mod)
-{
-	return LDB_SUCCESS;
-}
-
-static int stub_end_transaction(struct ldb_tv_module *kv_mod)
-{
-	return LDB_SUCCESS;
-}
-
-static int stub_del_transaction(struct ldb_tv_module *kv_mod)
-{
-	return LDB_SUCCESS;
-}
-
 static const struct ldb_tv_ops lmdb_ops = {
 	.search			= ldb_mdb_search_op,
 	.add			= ldb_mdb_add_op,
 	.del			= ldb_mdb_del_op,
 
-	.start_transaction	= stub_start_transaction,
-	.prepare_transaction	= stub_prepare_transaction,
-	.end_transaction	= stub_end_transaction,
-	.del_transaction	= stub_del_transaction,
+	.start_transaction	= ldb_mdb_trans_start,
+	.prepare_transaction	= ldb_mdb_trans_prepare,
+	.end_transaction	= ldb_mdb_trans_commit,
+	.del_transaction	= ldb_mdb_trans_cancel,
 };
 
 static int lmdb_pvt_destructor(struct lmdb_private *lmdb)
@@ -80,6 +60,7 @@ static struct lmdb_private *lmdb_pvt_create(TALLOC_CTX *mem_ctx,
 	if (lmdb == NULL) {
 		return NULL;
 	}
+	lmdb->ldb = ldb;
 
 	ret = mdb_env_create(&lmdb->env);
 	if (ret != 0) {

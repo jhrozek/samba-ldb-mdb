@@ -26,6 +26,7 @@
 #include <talloc.h>
 
 #include "ldb_mdb_util.h"
+#include "ldb_mdb_pvt.h"
 
 #define	DN_PREFIX	"DN="
 
@@ -191,13 +192,18 @@ void ldb_mdb_value_free(MDB_val *value)
 }
 
 int ldb_mdb_msg_store(struct ldb_context *ldb,
-		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
+		      struct lmdb_db_op *op,
 		      struct ldb_message *msg,
 		      int flags)
 {
 	int ret;
 	MDB_val mdb_key;
 	MDB_val mdb_val;
+	MDB_dbi mdb_dbi;
+	MDB_txn *tx;
+
+	mdb_dbi = lmdb_db_op_get_handle(op);
+	tx = lmdb_db_op_get_tx(op);
 
 	memset(&mdb_key, 0, sizeof(MDB_val));
 	memset(&mdb_val, 0, sizeof(MDB_val));
@@ -217,7 +223,7 @@ int ldb_mdb_msg_store(struct ldb_context *ldb,
 		goto done;
 	}
 
-	ret = mdb_put(mdb_txn, mdb_dbi, &mdb_key, &mdb_val, flags);
+	ret = mdb_put(tx, mdb_dbi, &mdb_key, &mdb_val, flags);
 	if (ret != 0) {
 		ldb_asprintf_errstring(ldb,
 				       "mdb_put failed: %s\n",
@@ -234,11 +240,16 @@ done:
 }
 
 int ldb_mdb_dn_delete(struct ldb_context *ldb,
-		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
+		      struct lmdb_db_op *op,
 		      struct ldb_dn *dn)
 {
 	int ret;
 	MDB_val mdb_key;
+	MDB_dbi mdb_dbi;
+	MDB_txn *mdb_txn;
+
+	mdb_dbi = lmdb_db_op_get_handle(op);
+	mdb_txn = lmdb_db_op_get_tx(op);
 
 	memset(&mdb_key, 0, sizeof(MDB_val));
 	ret = ldb_mdb_dn_to_key(dn, dn, &mdb_key);

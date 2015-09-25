@@ -27,11 +27,17 @@
 #include <lmdb.h>
 
 #include "ldb_private.h"
+#include "ldb_mdb_pvt.h"
 /* We need the discard_const() macros */
 #include "replace.h"
 
 /* Map lmdb errors to ldb error codes */
 int ldb_mdb_err_map(int lmdb_err);
+
+/* Opaque structure that holds info about mdb database operation.
+ * Use lmdb_db_op_* to access the internal data fields
+ */
+struct lmdb_db_op;
 
 /* Fills structure key with folded data from ldb_dn. The data is owned by
  * mem_ctx. Use ldb_mdb_key_free() to free the resources.
@@ -58,12 +64,28 @@ int ldb_mdb_value_to_msg(TALLOC_CTX *mem_ctx,
 void ldb_mdb_value_free(MDB_val *value);
 
 int ldb_mdb_msg_store(struct ldb_context *ldb,
-		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
+		      struct lmdb_db_op *op,
 		      struct ldb_message *msg,
 		      int flags);
 
 int ldb_mdb_dn_delete(struct ldb_context *ldb,
-		      MDB_txn *mdb_txn, MDB_dbi mdb_dbi,
+		      struct lmdb_db_op *op,
 		      struct ldb_dn *dn);
+
+/* internal transaction API */
+int lmdb_private_trans_start(struct lmdb_private *lmdb);
+int lmdb_private_trans_commit(struct lmdb_private *lmdb);
+int lmdb_private_trans_cancel(struct lmdb_private *lmdb);
+struct lmdb_trans *lmdb_private_trans_head(struct lmdb_private *lmdb);
+MDB_txn *lmdb_trans_get_tx(struct lmdb_trans *ltx);
+
+/* internal DB operation API */
+
+int lmdb_db_op_start(struct lmdb_trans *ltx);
+struct lmdb_db_op *lmdb_db_op_get(struct lmdb_trans *ltx);
+int lmdb_db_op_finish(struct lmdb_db_op *op);
+
+MDB_dbi lmdb_db_op_get_handle(struct lmdb_db_op *op);
+MDB_txn *lmdb_db_op_get_tx(struct lmdb_db_op *op);
 
 #endif /* _LDB_MDB_UTIL_H_ */
