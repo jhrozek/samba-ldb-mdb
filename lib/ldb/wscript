@@ -48,6 +48,10 @@ def configure(conf):
     conf.check_python_version((2,4,2))
     conf.SAMBA_CHECK_PYTHON_HEADERS(mandatory=True)
 
+    conf.check_cfg(package='cmocka', args='--cflags --libs',
+                   msg='Checking for cmocka unit testing framework')
+    conf.CHECK_LIB('cmocka', shlib=True)
+
     # where does the default LIBDIR end up? in conf.env somewhere?
     #
     conf.CONFIG_PATH('LDB_MODULESDIR', conf.SUBST_ENV_VAR('MODULESDIR') + '/ldb')
@@ -300,6 +304,12 @@ def build(bld):
                           deps='ldb dl popt',
                           private_library=True)
 
+    if bld.CONFIG_SET('HAVE_LIBCMOCKA'):
+        bld.SAMBA_BINARY('ldb_mdb_mod_op_test',
+                         source='tests/ldb_mod_op_test.c',
+                         deps='cmocka ldb',
+                         install=False)
+
 
 def test(ctx):
     '''run ldb testsuite'''
@@ -308,6 +318,7 @@ def test(ctx):
     shutil.rmtree(test_prefix, ignore_errors=True)
     os.makedirs(test_prefix)
     os.environ['TEST_DATA_PREFIX'] = test_prefix
+    os.environ['LD_LIBRARY_PATH'] = Utils.g_module.blddir + '/bin/default/lib/ldb'
     cmd = 'tests/test-tdb.sh %s' % Utils.g_module.blddir
     ret = samba_utils.RUN_COMMAND(cmd)
     print("testsuite returned %d" % ret)
@@ -320,6 +331,12 @@ def test(ctx):
         extra_env={'SELFTEST_PREFIX': test_prefix})
     print("Python testsuite returned %d" % pyret)
     sys.exit(ret or pyret)
+
+    os.environ['LDB_MODULES_PATH'] = Utils.g_module.blddir + '/modules/ldb'
+    os.environ['LD_LIBRARY_PATH'] = Utils.g_module.blddir + '/bin/default/lib/ldb'
+    cmd = Utils.g_module.blddir + '/apitest'
+    ret = samba_utils.RUN_COMMAND(cmd)
+    sys.exit(ret)
 
 def dist():
     '''makes a tarball for distribution'''
