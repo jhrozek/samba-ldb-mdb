@@ -312,8 +312,9 @@ int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
 	}
 
 	ret = LDB_SUCCESS;
-	*_msg = talloc_steal(mem_ctx, msg);
+	*_msg = talloc_move(mem_ctx, &msg);
 done:
+	talloc_free(msg);
 	ldb_mdb_key_free(&mdb_key);
 	return ret;
 }

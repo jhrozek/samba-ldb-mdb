@@ -375,3 +375,72 @@ done:
 
 	return ret;
 }
+
+int ldb_mdb_mod_op(struct ldb_tv_module *tv_mod,
+		   struct ldb_request *req,
+		   struct ldb_modify *mod_ctx)
+{
+	int ret;
+	struct ldb_context *ldb;
+	struct lmdb_private *lmdb;
+	struct ldb_message *db_msg;
+	TALLOC_CTX *mod_op_ctx = NULL;
+	struct lmdb_db_op *op = NULL;
+
+	ldb = ldb_tv_get_ldb_ctx(tv_mod);
+	lmdb = ldb_tv_get_mod_data(tv_mod);
+	if (ldb == NULL || lmdb == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	mod_op_ctx = talloc_new(req);
+	if (mod_op_ctx == NULL) {
+		ret = ldb_oom(ldb);
+		goto done;
+	}
+
+	op = ldb_mdb_op_start(lmdb);
+	if (op == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	ret = ldb_mdb_msg_get(mod_op_ctx,
+			      ldb, op,
+			      mod_ctx->message->dn,
+			      &db_msg);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	if (db_msg->dn == NULL) {
+		/* Handles PACKING_FORMAT_NODN */
+		db_msg->dn = mod_ctx->message->dn;
+	}
+
+	/* Mutate db_msg according to the modifications in mod_msg */
+	ret = ldb_msg_modify(ldb, mod_ctx->message, db_msg);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	/* Store updated db_msg in the database */
+	ret = ldb_mdb_msg_store(ldb, op, db_msg, 0);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	ret = ldb_mdb_op_commit(lmdb, op);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+	op = NULL;
+
+	ret = LDB_SUCCESS;
+done:
+	if (op != NULL) {
+		ldb_mdb_op_cancel(lmdb, op);
+	}
+
+	talloc_free(mod_op_ctx);
+	return ret;
+}
