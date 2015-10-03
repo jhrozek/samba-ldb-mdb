@@ -262,3 +262,58 @@ int ldb_mdb_dn_delete(struct ldb_context *ldb,
 
 	return ldb_mdb_err_map(ret);
 }
+
+int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
+		    struct ldb_context *ldb,
+		    struct lmdb_db_op *op,
+		    struct ldb_dn *dn,
+		    struct ldb_message **_msg)
+{
+	int ret;
+	MDB_val mdb_val;
+	MDB_val mdb_key;
+	MDB_txn *mdb_txn;
+	MDB_dbi mdb_dbi;
+	struct ldb_val ldb_data;
+	struct ldb_message *msg = NULL;
+
+	mdb_dbi = lmdb_db_op_get_handle(op);
+	mdb_txn = lmdb_db_op_get_tx(op);
+
+	memset(&mdb_key, 0, sizeof(MDB_val));
+	ret = ldb_mdb_dn_to_key(dn, dn, &mdb_key);
+	if (ret != LDB_SUCCESS) {
+		return ret;
+	}
+
+	ret = mdb_get(mdb_txn, mdb_dbi, &mdb_key, &mdb_val);
+	if (ret != 0) {
+		/* FIXME - ENOENT should be graceful */
+		ldb_asprintf_errstring(ldb,
+				       "mdb_get failed: %s\n",
+				       mdb_strerror(ret));
+		ret = ldb_mdb_err_map(ret);
+		goto done;
+	}
+
+	ldb_data.data = mdb_val.mv_data;
+	ldb_data.length = mdb_val.mv_size;
+
+	msg = talloc_zero(mem_ctx, struct ldb_message);
+	if (msg == NULL) {
+		ret = ldb_oom(ldb);
+		goto done;
+	}
+
+	ret = ldb_unpack_data(ldb, &ldb_data, msg);
+	if (ret != 0) {
+		ret = LDB_ERR_OTHER;
+		goto done;
+	}
+
+	ret = LDB_SUCCESS;
+	*_msg = talloc_steal(mem_ctx, msg);
+done:
+	ldb_mdb_key_free(&mdb_key);
+	return ret;
+}

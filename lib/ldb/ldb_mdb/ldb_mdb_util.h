@@ -72,6 +72,12 @@ int ldb_mdb_dn_delete(struct ldb_context *ldb,
 		      struct lmdb_db_op *op,
 		      struct ldb_dn *dn);
 
+int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
+		    struct ldb_context *ldb,
+		    struct lmdb_db_op *op,
+		    struct ldb_dn *dn,
+		    struct ldb_message **_msg);
+
 /* internal transaction API */
 int lmdb_private_trans_start(struct lmdb_private *lmdb);
 int lmdb_private_trans_commit(struct lmdb_private *lmdb);
