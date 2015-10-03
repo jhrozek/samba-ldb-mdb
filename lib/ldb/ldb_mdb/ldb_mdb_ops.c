@@ -373,3 +373,125 @@ done:
 	}
 	return ret;
 }
+
+int ldb_mdb_mod_op(struct ldb_tv_module *tv_mod,
+		   struct ldb_request *req,
+		   struct ldb_modify *mod_ctx)
+{
+	int ret;
+	struct ldb_dn *dn;
+	struct ldb_context *ldb;
+	struct ldb_val ldb_data;
+	struct lmdb_private *lmdb;
+	struct lmdb_trans *ltx;
+	MDB_val mdb_key;
+	MDB_val mdb_val;
+	MDB_txn *mdb_txn = NULL;
+	MDB_env *mdb_env;
+	MDB_dbi mdb_dbi;
+	struct ldb_message *db_msg;
+	TALLOC_CTX *mod_op_ctx = NULL;
+
+	ldb = ldb_tv_get_ldb_ctx(tv_mod);
+	lmdb = ldb_tv_get_mod_data(tv_mod);
+	if (ldb == NULL || lmdb == NULL) {
+		return LDB_ERR_OPERATIONS_ERROR;
+	}
+	mdb_env = lmdb->env;
+	dn = mod_ctx->message->dn;
+
+	/* Zero the structures so we can safely free them */
+	memset(&mdb_key, 0, sizeof(MDB_val));
+	memset(&mdb_val, 0, sizeof(MDB_val));
+	/* FIXME - verify dbi handles are > 0, else use a struct with a bool is_dbi_open */
+	mdb_dbi = 0;
+
+	mod_op_ctx = talloc_new(req);
+	if (mod_op_ctx == NULL) {
+		ret = ENOMEM;
+		goto done;
+	}
+
+	ret = ldb_mdb_dn_to_key(mod_op_ctx, dn, &mdb_key);
+	if (ret != LDB_SUCCESS) {
+		return ret;
+	}
+
+	db_msg = ldb_msg_new(mod_op_ctx);
+	if (db_msg == NULL) {
+		ret = ENOMEM;
+		goto done;
+	}
+
+	ret = ldb_mdb_trans_start(tv_mod);
+	if (ret != 0) {
+		goto done;
+	}
+	ltx = lmdb_private_trans_head(lmdb);
+	mdb_txn = lmdb_trans_get_tx(ltx);
+
+	ret = mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi);
+	if (ret != 0) {
+		ldb_asprintf_errstring(ldb,
+				"mdb_dbi_open failed: %s\n",
+				mdb_strerror(ret));
+		goto done;
+	}
+
+	ret = mdb_get(mdb_txn, mdb_dbi, &mdb_key, &mdb_val);
+	if (ret != 0) {
+		/* FIXME - ENOENT should be graceful */
+		ldb_asprintf_errstring(ldb,
+				       "mdb_get failed: %s\n",
+				       mdb_strerror(ret));
+		goto done;
+	}
+
+	ldb_data.data = mdb_val.mv_data;
+	ldb_data.length = mdb_val.mv_size;
+
+	ret = ldb_unpack_data(ldb, &ldb_data, db_msg);
+	if (ret != 0) {
+		ret = LDB_ERR_OTHER;
+		goto done;
+	}
+
+	if (db_msg->dn == NULL) {
+		/* Handles PACKING_FORMAT_NODN */
+		db_msg->dn = mod_ctx->message->dn;
+	}
+
+	/* Mutate db_msg according to the modifications in mod_msg */
+	ret = ldb_msg_modify(ldb, mod_ctx->message, db_msg);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	/* Store updated db_msg in the database */
+	ret = ldb_mdb_msg_store(ldb, mdb_txn, mdb_dbi, db_msg, 0);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+
+	mdb_dbi_close(mdb_env, mdb_dbi);
+	mdb_dbi = 0;
+
+	ret = ldb_mdb_trans_commit(tv_mod);
+	if (ret != 0) {
+		goto done;
+	}
+	mdb_txn = NULL;
+
+	ret = LDB_SUCCESS;
+done:
+	if (mdb_dbi) {
+		mdb_dbi_close(mdb_env, mdb_dbi);
+	}
+
+	if (mdb_txn != NULL) {
+		ldb_mdb_trans_cancel(tv_mod);
+	}
+
+	talloc_free(mod_op_ctx);
+	return ret;
+}
