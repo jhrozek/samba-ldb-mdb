@@ -316,6 +316,11 @@ def build(bld):
                          deps='cmocka ldb',
                          install=False)
 
+        bld.SAMBA_BINARY('ldb_mdb_util_test',
+                         source='ldb_mdb/ldb_mdb_util.c common/ldb_mod_msg.c tests/ldb_mdb_util_test.c',
+                         deps='cmocka lmdb ldb',
+                         install=False)
+
 
 def test(ctx):
     '''run ldb testsuite'''
