@@ -30,6 +30,9 @@
 /* We need the discard_const() macros */
 #include "replace.h"
 
+/* Map lmdb errors to ldb error codes */
+int ldb_mdb_err_map(int lmdb_err);
+
 /* Fills structure key with folded data from ldb_dn. The data is owned by
  * mem_ctx. Use ldb_mdb_key_free() to free the resources.
  */

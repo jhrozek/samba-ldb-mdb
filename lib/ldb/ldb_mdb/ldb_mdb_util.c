@@ -29,6 +29,42 @@
 
 #define	DN_PREFIX	"DN="
 
+int ldb_mdb_err_map(int lmdb_err)
+{
+	switch (lmdb_err) {
+	case MDB_SUCCESS:
+		return LDB_SUCCESS;
+	case MDB_INCOMPATIBLE:
+	case MDB_CORRUPTED:
+	case MDB_INVALID:
+	case EIO:
+		return LDB_ERR_OPERATIONS_ERROR;
+	case MDB_BAD_TXN:
+	case MDB_BAD_VALSIZE:
+	case MDB_BAD_DBI:
+	case MDB_PANIC:
+	case EINVAL:
+		return LDB_ERR_PROTOCOL_ERROR;
+	case MDB_MAP_FULL:
+	case MDB_DBS_FULL:
+	case MDB_READERS_FULL:
+	case MDB_TLS_FULL:
+	case MDB_TXN_FULL:
+	case EAGAIN:
+		return LDB_ERR_BUSY;
+	case MDB_KEYEXIST:
+		return LDB_ERR_ENTRY_ALREADY_EXISTS;
+	case MDB_NOTFOUND:
+	case ENOENT:
+		return LDB_ERR_NO_SUCH_OBJECT;
+	case EACCES:
+		return LDB_ERR_INSUFFICIENT_ACCESS_RIGHTS;
+	default:
+		break;
+	}
+	return LDB_ERR_OTHER;
+}
+
 int ldb_mdb_dn_to_key(TALLOC_CTX *mem_ctx,
 		      struct ldb_dn *dn,
 		      struct MDB_val *key)
