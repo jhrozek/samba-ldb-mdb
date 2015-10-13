@@ -22,6 +22,7 @@
 */
 
 #include <errno.h>
+#include <string.h>
 
 #include "ldb_private.h"
 #include "ldb_tev_wrap.h"
@@ -32,6 +33,7 @@ struct ldb_tv_module {
 
 	const char *name;
 	const struct ldb_tv_ops *ops;
+	const char * const *supp_ctrls;
 	void *kv_mod_data;
 };
 
@@ -42,6 +44,43 @@ struct ldb_tv_req {
 	struct tevent_timer *timeout_event;
 	bool handled;
 };
+
+static const char *ldb_tv_req_unsup_ctrl(struct ldb_tv_module *kv_mod,
+					 struct ldb_request *req)
+{
+	unsigned i;
+	unsigned ii;
+
+	if (req->controls == NULL) {
+		return NULL;
+	}
+
+	/* This is O(n**2) but normally the controls list is empty or has a
+	 * single element..
+	 */
+	for (i = 0; req->controls[i]; i++) {
+		if (req->controls[i]->critical) {
+			if (kv_mod->supp_ctrls == NULL) {
+				/* No ctrl supported? Just break */
+				return req->controls[i]->oid;
+			}
+
+			for (ii = 0; kv_mod->supp_ctrls[ii]; ii++) {
+				if (strcmp(kv_mod->supp_ctrls[ii],
+					   req->controls[i]->oid) == 0) {
+					/* We know this support */
+					break;
+				}
+			}
+
+			if (kv_mod->supp_ctrls[ii] == NULL) {
+				return req->controls[i]->oid;
+			}
+		}
+	}
+
+	return NULL;
+}
 
 /*
  * Finishes a request with status code error. If request was already finished,
@@ -157,6 +196,7 @@ static int ldb_tv_handle_request(struct ldb_module *ldb_mod,
 	struct ldb_tv_module *kv_mod;
 	struct tevent_immediate *imm;
 	struct timeval tv;
+	const char *unsup_ctrl;
 
 	ldb = ldb_module_get_ctx(ldb_mod);
 	ev = ldb_get_event_context(ldb);
@@ -165,8 +205,10 @@ static int ldb_tv_handle_request(struct ldb_module *ldb_mod,
 		return LDB_ERR_OPERATIONS_ERROR;
 	}
 
-	if (ldb_check_critical_controls(req->controls)) {
-		ldb_set_errstring(ldb, "No controls are supported yet!");
+	unsup_ctrl = ldb_tv_req_unsup_ctrl(kv_mod, req);
+	if (unsup_ctrl != NULL) {
+		ldb_asprintf_errstring(ldb, "Unsupported critical extension %s",
+				       unsup_ctrl);
 		return LDB_ERR_UNSUPPORTED_CRITICAL_EXTENSION;
 	}
 
@@ -266,6 +308,7 @@ static struct ldb_module_ops kv_ops = {
 int ldb_tv_register(TALLOC_CTX *mem_ctx,
 			      struct ldb_context *ldb,
 			      const char *name,
+			      const char *supp_ctrls[],
 			      const struct ldb_tv_ops *ops,
 			      void *kv_mod_data,
 			      struct ldb_tv_module **_kv_mod)
@@ -280,6 +323,7 @@ int ldb_tv_register(TALLOC_CTX *mem_ctx,
 	kv_mod->mod_ops = &kv_ops;
 	kv_mod->name = name;
 	kv_mod->mod_ops->name = name;
+	kv_mod->supp_ctrls = supp_ctrls;
 
 	kv_mod->ldb_mod = ldb_module_new(ldb,
 					 ldb,

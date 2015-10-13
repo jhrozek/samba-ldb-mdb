@@ -425,6 +425,7 @@ static struct ldb_message *build_mod_msg(TALLOC_CTX *mem_ctx,
 					 struct keyval *kvs)
 {
 	struct ldb_message *msg;
+	struct ldb_message_element *el;
 	int ret;
 	int i;
 
@@ -435,7 +436,8 @@ static struct ldb_message *build_mod_msg(TALLOC_CTX *mem_ctx,
 	assert_non_null(msg->dn);
 
 	for (i = 0; kvs[i].key != NULL; i++) {
-		if (modify_flags) {
+		el = ldb_msg_find_element(msg, kvs[i].key);
+		if (el == NULL && modify_flags) {
 			ret = ldb_msg_add_empty(msg, kvs[i].key,
 						modify_flags, NULL);
 			assert_int_equal(ret, 0);
@@ -522,9 +524,55 @@ static void mod_test_remove_data(struct ldb_mod_test_ctx *mod_test_ctx)
 			     mod_test_ctx->entry_dn);
 }
 
-static struct ldb_result *run_mod_test(struct ldb_mod_test_ctx *mod_test_ctx,
-				       int modify_flags,
-				       struct keyval *kvs)
+static int ldb_modify_permissive(struct ldb_context *ldb,
+                                 struct ldb_message *msg)
+{
+	struct ldb_request *req;
+	int ret;
+
+	ret = ldb_build_mod_req(&req, ldb, ldb, msg, NULL, NULL,
+				ldb_op_default_callback, NULL);
+	if (ret != LDB_SUCCESS) {
+		return ret;
+	}
+
+	ret = ldb_request_add_control(req, LDB_CONTROL_PERMISSIVE_MODIFY_OID,
+				      true, NULL);
+	if (ret != LDB_SUCCESS) {
+		talloc_free(req);
+		return ret;
+	}
+
+	ret = ldb_transaction_start(ldb);
+	if (ret != LDB_SUCCESS) {
+		talloc_free(req);
+		return ret;
+	}
+
+	ret = ldb_request(ldb, req);
+	if (ret == LDB_SUCCESS) {
+		ret = ldb_wait(req->handle, LDB_WAIT_ALL);
+	} else {
+		talloc_free(req);
+		ldb_transaction_cancel(ldb);
+		return ret;
+	}
+
+	ret = ldb_transaction_commit(ldb);
+	if (ret != LDB_SUCCESS) {
+		talloc_free(req);
+		return ret;
+	}
+
+	talloc_free(req);
+	return ret;
+}
+
+static struct ldb_result *run_mod_test_ex(struct ldb_mod_test_ctx *mod_test_ctx,
+					  int modify_flags,
+					  int expected_ret,
+					  struct keyval *kvs,
+					  bool permissive)
 {
 	TALLOC_CTX *tmp_ctx;
 	struct ldb_result *res;
@@ -542,8 +590,12 @@ static struct ldb_result *run_mod_test(struct ldb_mod_test_ctx *mod_test_ctx,
 				modify_flags, kvs);
 	assert_non_null(mod_msg);
 
-	ret = ldb_modify(ldb_test_ctx->ldb, mod_msg);
-	assert_int_equal(ret, LDB_SUCCESS);
+	if (permissive == true) {
+		ret = ldb_modify_permissive(ldb_test_ctx->ldb, mod_msg);
+	} else {
+		ret = ldb_modify(ldb_test_ctx->ldb, mod_msg);
+	}
+	assert_int_equal(ret, expected_ret);
 
 	basedn = ldb_dn_new_fmt(tmp_ctx, ldb_test_ctx->ldb,
 			"%s", mod_test_ctx->entry_dn);
@@ -559,6 +611,22 @@ static struct ldb_result *run_mod_test(struct ldb_mod_test_ctx *mod_test_ctx,
 
 	talloc_free(tmp_ctx);
 	return res;
+}
+
+static struct ldb_result *run_mod_test(struct ldb_mod_test_ctx *mod_test_ctx,
+				       int modify_flags,
+				       struct keyval *kvs)
+{
+	return run_mod_test_ex(mod_test_ctx, modify_flags,
+			       LDB_SUCCESS, kvs, false);
+}
+
+static struct ldb_result *run_mod_test_perm(struct ldb_mod_test_ctx *mod_test_ctx,
+					    int modify_flags,
+					    struct keyval *kvs)
+{
+	return run_mod_test_ex(mod_test_ctx, modify_flags,
+			       LDB_SUCCESS, kvs, true);
 }
 
 static int ldb_modify_test_setup(void **state)
@@ -814,6 +882,166 @@ static void test_ldb_modify_del_keyval(void **state)
 
 	el = ldb_msg_find_element(res->msgs[0], "cn");
 	assert_null(el);
+}
+
+static void test_ldb_modify_add_existing_key(void **state)
+{
+	struct ldb_mod_test_ctx *mod_test_ctx = \
+			talloc_get_type_abort(*state,
+					      struct ldb_mod_test_ctx);
+	struct ldb_message_element *el;
+	struct ldb_result *res;
+	struct keyval kvs[] = {
+		{ "cn", "test_mod_cn" },
+		{ "cn", "test_mod_cn2" },
+		{ "uid", "test_mod_uid" },
+		{ NULL, NULL },
+	};
+
+	/* Non-permissive mod must fail */
+	res = run_mod_test_ex(mod_test_ctx, LDB_FLAG_MOD_ADD,
+			      LDB_ERR_ATTRIBUTE_OR_VALUE_EXISTS,
+			      kvs, false);
+	assert_non_null(res);
+	assert_int_equal(res->count, 1);
+
+	/* The values must be intact */
+	el = ldb_msg_find_element(res->msgs[0], "cn");
+	assert_non_null(el);
+	assert_int_equal(el->num_values, 1);
+	assert_string_equal(el->values[0].data, "test_mod_cn");
+
+	el = ldb_msg_find_element(res->msgs[0], "uid");
+	assert_null(el);
+
+	/* Permissive mod must succeed */
+	res = run_mod_test_perm(mod_test_ctx, LDB_FLAG_MOD_ADD, kvs);
+	assert_non_null(res);
+	assert_int_equal(res->count, 1);
+
+	/* Adding the second value must succeed */
+	el = ldb_msg_find_element(res->msgs[0], "cn");
+	assert_non_null(el);
+	assert_int_equal(el->num_values, 2);
+	assert_string_equal(el->values[0].data, "test_mod_cn");
+	assert_string_equal(el->values[1].data, "test_mod_cn2");
+
+	/* As well as adding a second element */
+	el = ldb_msg_find_element(res->msgs[0], "uid");
+	assert_non_null(el);
+	assert_int_equal(el->num_values, 1);
+	assert_string_equal(el->values[0].data, "test_mod_uid");
+}
+
+static void test_ldb_modify_del_noexisting_keyval(void **state)
+{
+	struct ldb_mod_test_ctx *mod_test_ctx = \
+			talloc_get_type_abort(*state,
+					      struct ldb_mod_test_ctx);
+	struct ldb_message_element *el;
+	struct ldb_result *res;
+	struct keyval kvs[] = {
+		{ "cn", "test_mod_no_such_cn" },
+		{ NULL, NULL },
+	};
+
+	/* Non-permissive mod must fail */
+	res = run_mod_test_ex(mod_test_ctx, LDB_FLAG_MOD_DELETE,
+			      LDB_ERR_NO_SUCH_ATTRIBUTE, kvs, false);
+	assert_non_null(res);
+	assert_int_equal(res->count, 1);
+
+	/* The values must be intact */
+	el = ldb_msg_find_element(res->msgs[0], "cn");
+	assert_non_null(el);
+	assert_int_equal(el->num_values, 1);
+	assert_string_equal(el->values[0].data, "test_mod_cn");
+
+	/* Permissive mod must succeed */
+	res = run_mod_test_perm(mod_test_ctx, LDB_FLAG_MOD_DELETE, kvs);
+	assert_non_null(res);
+	assert_int_equal(res->count, 1);
+
+	/* The values must still be intact */
+	el = ldb_msg_find_element(res->msgs[0], "cn");
+	assert_non_null(el);
+	assert_int_equal(el->num_values, 1);
+	assert_string_equal(el->values[0].data, "test_mod_cn");
+}
+
+static void test_ldb_modify_del_noexisting_key(void **state)
+{
+	struct ldb_mod_test_ctx *mod_test_ctx = \
+			talloc_get_type_abort(*state,
+					      struct ldb_mod_test_ctx);
+	struct ldb_message_element *el;
+	struct ldb_result *res;
+	struct keyval kvs[] = {
+		{ "uid", "test_mod_no_such_uid" },
+		{ NULL, NULL },
+	};
+
+	/* Non-permissive mod must fail */
+	res = run_mod_test_ex(mod_test_ctx, LDB_FLAG_MOD_DELETE,
+			      LDB_ERR_NO_SUCH_ATTRIBUTE, kvs, false);
+	assert_non_null(res);
+	assert_int_equal(res->count, 1);
+
+	/* The values must be intact */
+	el = ldb_msg_find_element(res->msgs[0], "cn");
+	assert_non_null(el);
+	assert_int_equal(el->num_values, 1);
+	assert_string_equal(el->values[0].data, "test_mod_cn");
+
+	/* Permissive mod must succeed */
+	res = run_mod_test_perm(mod_test_ctx, LDB_FLAG_MOD_DELETE, kvs);
+	assert_non_null(res);
+	assert_int_equal(res->count, 1);
+
+	/* The values must still be intact */
+	el = ldb_msg_find_element(res->msgs[0], "cn");
+	assert_non_null(el);
+	assert_int_equal(el->num_values, 1);
+	assert_string_equal(el->values[0].data, "test_mod_cn");
+}
+
+static void test_ldb_modify_unsupp_control(void **state)
+{
+	struct ldb_mod_test_ctx *mod_test_ctx = \
+			talloc_get_type_abort(*state,
+					      struct ldb_mod_test_ctx);
+
+	struct ldb_context *ldb = mod_test_ctx->ldb_test_ctx->ldb;
+	struct ldb_request *req;
+	struct ldb_message *mod_msg;
+	struct keyval mod_kvs[] = {
+		{ "cn", "test_mod_cn2" },
+		{ NULL, NULL },
+	};
+	int ret;
+
+	mod_msg = build_mod_msg(mod_test_ctx, mod_test_ctx->ldb_test_ctx,
+				mod_test_ctx->entry_dn,
+				LDB_FLAG_MOD_ADD, mod_kvs);
+	assert_non_null(mod_msg);
+
+	ret = ldb_build_mod_req(&req, ldb, mod_test_ctx, mod_msg, NULL, NULL,
+				ldb_op_default_callback, NULL);
+	assert_int_equal(ret, LDB_SUCCESS);
+
+	/* Random contrl not supported by tdb backend */
+	ret = ldb_request_add_control(req, LDB_CONTROL_SERVER_LAZY_COMMIT,
+				      true, NULL);
+	assert_int_equal(ret, LDB_SUCCESS);
+
+	ret = ldb_transaction_start(ldb);
+	assert_int_equal(ret, LDB_SUCCESS);
+
+	ret = ldb_request(ldb, req);
+	assert_int_equal(ret, LDB_ERR_UNSUPPORTED_CRITICAL_EXTENSION);
+
+	talloc_free(req);
+	ldb_transaction_cancel(ldb);
 }
 
 struct search_test_ctx {
@@ -1342,6 +1570,18 @@ int main(int argc, const char **argv)
 						ldb_modify_test_setup,
 						ldb_modify_test_teardown),
 		cmocka_unit_test_setup_teardown(test_ldb_modify_del_keyval,
+						ldb_modify_test_setup,
+						ldb_modify_test_teardown),
+		cmocka_unit_test_setup_teardown(test_ldb_modify_add_existing_key,
+						ldb_modify_test_setup,
+						ldb_modify_test_teardown),
+		cmocka_unit_test_setup_teardown(test_ldb_modify_del_noexisting_keyval,
+						ldb_modify_test_setup,
+						ldb_modify_test_teardown),
+		cmocka_unit_test_setup_teardown(test_ldb_modify_del_noexisting_key,
+						ldb_modify_test_setup,
+						ldb_modify_test_teardown),
+		cmocka_unit_test_setup_teardown(test_ldb_modify_unsupp_control,
 						ldb_modify_test_setup,
 						ldb_modify_test_teardown),
 		cmocka_unit_test_setup_teardown(test_search_match_none,

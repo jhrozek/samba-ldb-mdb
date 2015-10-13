@@ -457,6 +457,28 @@ static void test_filter_duplicates(void **state)
 	assert_int_equal(rv, LDB_SUCCESS);
 	assert_int_equal(el2->num_values, 1);
 	assert_string_equal(el2->values[0].data, "test_cn_val2");
+
+	rv = ldb_msg_add_string(msg, "uid", "test_uid_val1");
+	assert_int_equal(rv, LDB_SUCCESS);
+	rv = ldb_msg_add_string(msg, "uid", "test_uid_val2");
+	assert_int_equal(rv, LDB_SUCCESS);
+	el = ldb_msg_find_element(msg, "uid");
+	assert_non_null(el);
+
+	msg2 = ldb_msg_new(mem_ctx);
+	assert_non_null(msg2);
+
+	rv = ldb_msg_add_string(msg2, "uid", "test_uid_val1");
+	assert_int_equal(rv, LDB_SUCCESS);
+	rv = ldb_msg_add_string(msg2, "uid", "test_uid_val2");
+	assert_int_equal(rv, LDB_SUCCESS);
+	el2 = ldb_msg_find_element(msg2, "uid");
+	assert_non_null(el2);
+
+	assert_int_equal(el2->num_values, 2);
+	rv = filter_duplicates(el, el2, true);
+	assert_int_equal(rv, LDB_SUCCESS);
+	assert_int_equal(el2->num_values, 0);
 }
 
 static void test_el_shallow_copy(void **state)

@@ -336,7 +336,8 @@ static int mod_el_extend(struct ldb_context *ldb,
 			 struct ldb_message *db_msg,
 			 const struct ldb_schema_attribute *sch_attr,
 			 struct ldb_message_element *el,
-			 int db_idx)
+			 int db_idx,
+			 bool permissive)
 {
 	struct ldb_message_element *db_el;
 	int ret;
@@ -355,7 +356,14 @@ static int mod_el_extend(struct ldb_context *ldb,
 		return LDB_ERR_ATTRIBUTE_OR_VALUE_EXISTS;
 	}
 
-	ret = filter_duplicates(db_el, el, false);
+	if (permissive) {
+		el = el_shallow_copy(db_msg, el);
+		if (el == NULL) {
+			return ENOMEM;
+		}
+	}
+
+	ret = filter_duplicates(db_el, el, permissive);
 	if (ret != LDB_SUCCESS) {
 		return LDB_ERR_ATTRIBUTE_OR_VALUE_EXISTS;
 	}
@@ -381,7 +389,8 @@ static int mod_el_extend(struct ldb_context *ldb,
 
 static int mod_el_add(struct ldb_context *ldb,
 		      struct ldb_message *db_msg,
-		      struct ldb_message_element *el)
+		      struct ldb_message_element *el,
+		      bool permissive)
 {
 	int idx;
 	const struct ldb_schema_attribute *sch_attr;
@@ -410,7 +419,7 @@ static int mod_el_add(struct ldb_context *ldb,
 		/* Element didn't exist, add it */
 		return add_element(db_msg, el);
 	} else {
-		return mod_el_extend(ldb, db_msg, sch_attr, el, idx);
+		return mod_el_extend(ldb, db_msg, sch_attr, el, idx, permissive);
 	}
 }
 
@@ -500,10 +509,10 @@ static inline int handle_notfound(struct ldb_context *ldb,
 
 static int mod_el_del(struct ldb_context *ldb,
 		      struct ldb_message *db_msg,
-		      struct ldb_message_element *el)
+		      struct ldb_message_element *el,
+		      bool permissive)
 {
 	int ret;
-	bool permissive = false;
 	size_t i;
 
 	if (el->num_values == 0) {
@@ -536,7 +545,8 @@ static int mod_el_del(struct ldb_context *ldb,
  */
 int ldb_msg_modify(struct ldb_context *ldb,
 		   const struct ldb_message *mod_msg,
-		   struct ldb_message *db_msg)
+		   struct ldb_message *db_msg,
+		   bool permissive)
 {
 	struct ldb_message_element *el;
 	int ret;
@@ -547,13 +557,13 @@ int ldb_msg_modify(struct ldb_context *ldb,
 
 		switch (el->flags & LDB_FLAG_MOD_MASK) {
 			case LDB_FLAG_MOD_ADD:
-				ret = mod_el_add(ldb, db_msg, el);
+				ret = mod_el_add(ldb, db_msg, el, permissive);
 				break;
 			case LDB_FLAG_MOD_REPLACE:
 				ret = mod_el_rep(ldb, db_msg, el);
 				break;
 			case LDB_FLAG_MOD_DELETE:
-				ret = mod_el_del(ldb, db_msg, el);
+				ret = mod_el_del(ldb, db_msg, el, permissive);
 				break;
 			default:
 				ldb_asprintf_errstring(ldb,
@@ -564,6 +574,10 @@ int ldb_msg_modify(struct ldb_context *ldb,
 						el->flags & LDB_FLAG_MOD_MASK);
 				ret = LDB_ERR_PROTOCOL_ERROR;
 				break;
+		}
+
+		if (ret != LDB_SUCCESS) {
+			break;
 		}
 	}
 

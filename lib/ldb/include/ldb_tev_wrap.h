@@ -69,6 +69,7 @@ struct ldb_tv_ops {
 int ldb_tv_register(TALLOC_CTX *mem_ctx,
 		    struct ldb_context *ldb,
 		    const char *name,
+		    const char *supp_ctrls[],
 		    const struct ldb_tv_ops *ops,
 		    void *kv_mod_data,
 		    struct ldb_tv_module **_kv_mod);

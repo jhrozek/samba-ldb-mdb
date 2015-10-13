@@ -445,7 +445,8 @@ int ldb_unpack_data_only_attr_list_flags(struct ldb_context *ldb,
  */
 int ldb_msg_modify(struct ldb_context *ldb,
 		   const struct ldb_message *mod_msg,
-		   struct ldb_message *db_msg);
+		   struct ldb_message *db_msg,
+		   bool permissive);
 
 /* Filters selected attributes from a ldb_message */
 struct ldb_message *ldb_msg_filter_attrs(struct ldb_message *msg,

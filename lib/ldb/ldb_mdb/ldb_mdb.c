@@ -45,6 +45,11 @@ static const struct ldb_tv_ops lmdb_ops = {
 	.del_transaction	= ldb_mdb_trans_cancel,
 };
 
+static const char *supported_controls[] = {
+	LDB_CONTROL_PERMISSIVE_MODIFY_OID,
+	NULL,
+};
+
 static int lmdb_pvt_destructor(struct lmdb_private *lmdb)
 {
 	mdb_env_close(lmdb->env);
@@ -128,7 +133,7 @@ static int lmdb_connect(struct ldb_context *ldb, const char *url,
 		return ldb_oom(ldb);
 	}
 
-	ret = ldb_tv_register(lmdb, ldb, "ldb_mdb",
+	ret = ldb_tv_register(lmdb, ldb, "ldb_mdb", supported_controls,
 			      &lmdb_ops, lmdb, &kv_mod);
 	if (ret != LDB_SUCCESS) {
 		talloc_free(lmdb);

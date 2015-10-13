@@ -392,12 +392,16 @@ int ldb_mdb_mod_op(struct ldb_tv_module *tv_mod,
 	struct ldb_message *db_msg;
 	TALLOC_CTX *mod_op_ctx = NULL;
 	struct lmdb_db_op *op = NULL;
+	bool control_permissive;
 
 	ldb = ldb_tv_get_ldb_ctx(tv_mod);
 	lmdb = ldb_tv_get_mod_data(tv_mod);
 	if (ldb == NULL || lmdb == NULL) {
 		return LDB_ERR_OPERATIONS_ERROR;
 	}
+
+	control_permissive = ldb_request_get_control(req,
+					LDB_CONTROL_PERMISSIVE_MODIFY_OID);
 
 	mod_op_ctx = talloc_new(req);
 	if (mod_op_ctx == NULL) {
@@ -424,7 +428,7 @@ int ldb_mdb_mod_op(struct ldb_tv_module *tv_mod,
 	}
 
 	/* Mutate db_msg according to the modifications in mod_msg */
-	ret = ldb_msg_modify(ldb, mod_ctx->message, db_msg);
+	ret = ldb_msg_modify(ldb, mod_ctx->message, db_msg, control_permissive);
 	if (ret != LDB_SUCCESS) {
 		goto done;
 	}
