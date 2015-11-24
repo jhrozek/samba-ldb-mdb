@@ -92,12 +92,16 @@ struct lmdb_trans *lmdb_private_trans_head(struct lmdb_private *lmdb);
 MDB_txn *lmdb_trans_get_tx(struct lmdb_trans *ltx);
 
 /* internal DB operation API */
-
-int lmdb_db_op_start(struct lmdb_trans *ltx);
-struct lmdb_db_op *lmdb_db_op_get(struct lmdb_trans *ltx);
-int lmdb_db_op_finish(struct lmdb_db_op *op);
-
 MDB_dbi lmdb_db_op_get_handle(struct lmdb_db_op *op);
 MDB_txn *lmdb_db_op_get_tx(struct lmdb_db_op *op);
+
+/* Helpers to manage transactions and main db handles at the same time */
+struct lmdb_db_op *ldb_mdb_op_start(struct lmdb_private *lmdb);
+int ldb_mdb_op_commit(struct lmdb_private *lmdb, struct lmdb_db_op *op);
+int ldb_mdb_op_cancel(struct lmdb_private *lmdb, struct lmdb_db_op *op);
+
+/* == Schema operations == */
+int ldb_mdb_meta_load_op(struct lmdb_private *lmdb,
+		         struct lmdb_db_op *op);
 
 #endif /* _LDB_MDB_UTIL_H_ */

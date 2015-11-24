@@ -48,7 +48,7 @@ struct lmdb_trans {
 	/* DB op on the default, unnamed database. Add more ops for
 	 * other databases (indexes?)
 	 */
-	struct lmdb_db_op db_op;
+	struct lmdb_db_op *db_op;
 };
 
 static void trans_push(struct lmdb_private *lmdb, struct lmdb_trans *ltx)
@@ -96,9 +96,15 @@ int lmdb_private_trans_start(struct lmdb_private *lmdb)
 	}
 	talloc_set_destructor(ltx, ldb_mdb_trans_destructor);
 
+	ltx->db_op = talloc_zero(ltx, struct lmdb_db_op);
+	if (ltx->db_op  == NULL) {
+		talloc_free(ltx);
+		return ldb_oom(lmdb->ldb);
+	}
+
 	ltx->lmdb = lmdb;
-	ltx->db_op.mdb_dbi = 0;
-	ltx->db_op.ltx = ltx;
+	ltx->db_op->mdb_dbi = 0;
+	ltx->db_op->ltx = ltx;
 
 	ltx_head = lmdb_private_trans_head(lmdb);
 	tx_parent = lmdb_trans_get_tx(ltx_head);
@@ -173,7 +179,7 @@ static int lmdb_named_db_op_start(struct lmdb_trans *ltx,
 		return LDB_ERR_OPERATIONS_ERROR;
 	}
 
-	ret = mdb_dbi_open(mdb_txn, NULL, 0, &ltx->db_op.mdb_dbi);
+	ret = mdb_dbi_open(mdb_txn, NULL, 0, &ltx->db_op->mdb_dbi);
 	if (ret != 0) {
 		ldb_asprintf_errstring(ltx->lmdb->ldb,
 				       "mdb_dbi_open failed: %s\n",
@@ -184,13 +190,7 @@ static int lmdb_named_db_op_start(struct lmdb_trans *ltx,
 	return LDB_SUCCESS;
 }
 
-int lmdb_db_op_start(struct lmdb_trans *ltx)
-{
-	/* This is the main ldb database (no name) */
-	return lmdb_named_db_op_start(ltx, NULL, 0);
-}
-
-int lmdb_db_op_finish(struct lmdb_db_op *op)
+static int lmdb_db_op_finish(struct lmdb_db_op *op)
 {
 	struct lmdb_private *lmdb;
 
@@ -245,7 +245,77 @@ MDB_txn *lmdb_db_op_get_tx(struct lmdb_db_op *op)
 	return op->ltx->tx;
 }
 
-struct lmdb_db_op *lmdb_db_op_get(struct lmdb_trans *ltx)
+/* Helpers to manage transactions and main db handles at the same time */
+/* FIXME - should the ldb_mdb_op_start API also have a talloc_ctx?
+ * Looks like we're leaking the context now...
+ */
+struct lmdb_db_op *ldb_mdb_op_start(struct lmdb_private *lmdb)
 {
-	return &(ltx->db_op);
+	int ret;
+	struct lmdb_trans *ltx;
+
+	ret = lmdb_private_trans_start(lmdb);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot start transaction\n");
+		return NULL;
+	}
+
+	ltx = lmdb_private_trans_head(lmdb);
+	if (ltx == NULL) {
+		/* Huh? Try to roll back..*/
+		lmdb_private_trans_cancel(lmdb);
+		return NULL;
+	}
+
+	ret = lmdb_named_db_op_start(ltx, NULL, 0);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot start db operation\n");
+		lmdb_private_trans_cancel(lmdb);
+		return NULL;
+	}
+
+	return ltx->db_op;
+}
+
+int ldb_mdb_op_commit(struct lmdb_private *lmdb,
+		      struct lmdb_db_op *op)
+{
+	int ret;
+
+	ret = lmdb_db_op_finish(op);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot finish db operation\n");
+		lmdb_private_trans_cancel(lmdb);
+		return ret;
+	}
+
+	ret = lmdb_private_trans_commit(lmdb);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot commit db transaction\n");
+		lmdb_private_trans_cancel(lmdb);
+		return ret;
+	}
+
+	return LDB_SUCCESS;
+}
+
+int ldb_mdb_op_cancel(struct lmdb_private *lmdb,
+		      struct lmdb_db_op *op)
+{
+	int ret;
+
+	ret = lmdb_db_op_finish(op);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot finish db operation\n");
+		lmdb_private_trans_cancel(lmdb);
+		return ret;
+	}
+
+	ret = lmdb_private_trans_cancel(lmdb);
+	if (ret != LDB_SUCCESS) {
+		ldb_asprintf_errstring(lmdb->ldb, "Cannot cancel db transaction\n");
+		return ret;
+	}
+
+	return LDB_SUCCESS;
 }

@@ -72,78 +72,6 @@ int ldb_mdb_trans_cancel(struct ldb_tv_module *tv_mod)
 	return lmdb_private_trans_cancel(lmdb);
 }
 
-/* Helpers to manage transactions and main db handles at the same time */
-static struct lmdb_db_op *ldb_mdb_op_start(struct lmdb_private *lmdb)
-{
-	int ret;
-	struct lmdb_trans *ltx;
-
-	ret = lmdb_private_trans_start(lmdb);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot start transaction\n");
-		return NULL;
-	}
-
-	ltx = lmdb_private_trans_head(lmdb);
-	if (ltx == NULL) {
-		/* Huh? Try to roll back..*/
-		lmdb_private_trans_cancel(lmdb);
-		return NULL;
-	}
-
-	ret = lmdb_db_op_start(ltx);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot start db operation\n");
-		lmdb_private_trans_cancel(lmdb);
-		return NULL;
-	}
-
-	return lmdb_db_op_get(ltx);
-}
-
-static int ldb_mdb_op_commit(struct lmdb_private *lmdb,
-			     struct lmdb_db_op *op)
-{
-	int ret;
-
-	ret = lmdb_db_op_finish(op);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot finish db operation\n");
-		lmdb_private_trans_cancel(lmdb);
-		return ret;
-	}
-
-	ret = lmdb_private_trans_commit(lmdb);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot commit db transaction\n");
-		lmdb_private_trans_cancel(lmdb);
-		return ret;
-	}
-
-	return LDB_SUCCESS;
-}
-
-static int ldb_mdb_op_cancel(struct lmdb_private *lmdb,
-			     struct lmdb_db_op *op)
-{
-	int ret;
-
-	ret = lmdb_db_op_finish(op);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot finish db operation\n");
-		lmdb_private_trans_cancel(lmdb);
-		return ret;
-	}
-
-	ret = lmdb_private_trans_cancel(lmdb);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot cancel db transaction\n");
-		return ret;
-	}
-
-	return LDB_SUCCESS;
-}
-
 /* Does it make sense to pass the request as an ephemeral memory context? */
 int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 		   struct ldb_request *req,
@@ -167,6 +95,11 @@ int ldb_mdb_add_op(struct ldb_tv_module *tv_mod,
 	op = ldb_mdb_op_start(lmdb);
 	if (op == NULL) {
 		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	ret = ldb_mdb_meta_load_op(lmdb, op);
+	if (ret != LDB_SUCCESS) {
+		return ret;
 	}
 
 	ret = ldb_mdb_msg_store(ldb,
@@ -210,6 +143,11 @@ int ldb_mdb_del_op(struct ldb_tv_module *tv_mod,
 	op = ldb_mdb_op_start(lmdb);
 	if (op == NULL) {
 		return LDB_ERR_OPERATIONS_ERROR;
+	}
+
+	ret = ldb_mdb_meta_load_op(lmdb, op);
+	if (ret != LDB_SUCCESS) {
+		return ret;
 	}
 
 	ret = ldb_mdb_dn_delete(ldb, op, del_ctx->dn);
@@ -303,6 +241,11 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 	}
 	mdb_dbi = lmdb_db_op_get_handle(op);
 	mdb_txn = lmdb_db_op_get_tx(op);
+
+	ret = ldb_mdb_meta_load_op(lmdb, op);
+	if (ret != LDB_SUCCESS) {
+		return ret;
+	}
 
 	/* FIXME - might not need cursor at all. Might just use mdb_get. Need to
 	 * check implementation
@@ -414,6 +357,11 @@ int ldb_mdb_mod_op(struct ldb_tv_module *tv_mod,
 		return LDB_ERR_OPERATIONS_ERROR;
 	}
 
+	ret = ldb_mdb_meta_load_op(lmdb, op);
+	if (ret != LDB_SUCCESS) {
+		return ret;
+	}
+
 	ret = ldb_mdb_msg_get(mod_op_ctx,
 			      ldb, op,
 			      mod_ctx->message->dn,
@@ -489,6 +437,11 @@ int ldb_mdb_rename_op(struct ldb_tv_module *tv_mod,
 	op = ldb_mdb_op_start(lmdb);
 	if (op == NULL) {
 		goto done;
+	}
+
+	ret = ldb_mdb_meta_load_op(lmdb, op);
+	if (ret != LDB_SUCCESS) {
+		return ret;
 	}
 
 	msg = ldb_msg_new(req);

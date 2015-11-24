@@ -34,6 +34,11 @@ struct lmdb_private {
 	MDB_env *env;
 
 	struct lmdb_trans *txlist;
+
+	struct ldb_mdb_metadata {
+		struct ldb_message *attributes;
+		unsigned seqnum;
+	} *meta;
 };
 
 /* == Module operations == */
@@ -61,4 +66,8 @@ int ldb_mdb_trans_start(struct ldb_tv_module *tv_mod);
 int ldb_mdb_trans_prepare(struct ldb_tv_module *tv_mod);
 int ldb_mdb_trans_commit(struct ldb_tv_module *tv_mod);
 int ldb_mdb_trans_cancel(struct ldb_tv_module *tv_mod);
+
+int ldb_mdb_meta_load(struct lmdb_private *lmdb);
+int ldb_mdb_baseinfo_init(struct lmdb_private *lmdb);
+
 #endif /* _LDB_MDB_PVT_H_ */
