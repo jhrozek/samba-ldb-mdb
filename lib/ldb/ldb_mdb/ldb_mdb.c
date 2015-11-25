@@ -148,19 +148,8 @@ static int lmdb_connect(struct ldb_context *ldb, const char *url,
 		return ret;
 	}
 
-	ret = ldb_mdb_meta_load(lmdb);
-	if (ret == LDB_ERR_NO_SUCH_OBJECT) {
-		/* This starts another transaction, but should be rare enough
-		 * (once per DB lifetime) to not justify changing the API
-		 */
-		ret = ldb_mdb_baseinfo_init(lmdb);
-		if (ret != LDB_SUCCESS) {
-			ldb_debug(ldb, LDB_DEBUG_ERROR,
-				  "Unable to initialize db metadata!\n");
-			talloc_free(lmdb);
-			return ret;
-		}
-	} else if (ret != LDB_SUCCESS) {
+	ret = ldb_mdb_meta_connect(lmdb);
+	if (ret != LDB_SUCCESS) {
 		ldb_debug(ldb, LDB_DEBUG_ERROR,
 			  "Unable to load db metadata!\n");
 		talloc_free(lmdb);

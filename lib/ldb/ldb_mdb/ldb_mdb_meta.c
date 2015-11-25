@@ -112,8 +112,8 @@ static struct ldb_message *update_baseinfo_msg(TALLOC_CTX *mem_ctx,
 }
 
 /* Store an updated baseinfo record with increased lmdb->seqnum */
-int ldb_mdb_seqnum_inc(struct lmdb_private *lmdb,
-		       struct lmdb_db_op *op)
+static int ldb_mdb_seqnum_inc(struct lmdb_private *lmdb,
+			      struct lmdb_db_op *op)
 {
 	int ret;
 	struct ldb_message *msg;
@@ -195,12 +195,12 @@ static struct ldb_mdb_metadata *ldb_mdb_meta_new(TALLOC_CTX *mem_ctx)
 }
 
 /* refactor when tested */
-int ldb_mdb_baseinfo_init(struct lmdb_private *lmdb)
+static int ldb_mdb_baseinfo_init(struct lmdb_private *lmdb,
+			         struct lmdb_db_op *op)
 {
 	int ret;
 	struct ldb_message *msg;
 	struct ldb_context *ldb;
-	struct lmdb_db_op *op = NULL;
 
 	ldb = lmdb->ldb;
 
@@ -211,12 +211,6 @@ int ldb_mdb_baseinfo_init(struct lmdb_private *lmdb)
 		}
 	}
 
-	op = ldb_mdb_op_start(lmdb);
-	if (op == NULL) {
-		ret = LDB_ERR_OPERATIONS_ERROR;
-		goto done;
-	}
-
 	msg = update_baseinfo_msg(op, ldb, lmdb->meta->seqnum);
 	if (msg == NULL) {
 		return LDB_ERR_OPERATIONS_ERROR;
@@ -225,23 +219,11 @@ int ldb_mdb_baseinfo_init(struct lmdb_private *lmdb)
 	ret = ldb_mdb_msg_store(lmdb->ldb, op, msg, MDB_NOOVERWRITE);
 	talloc_free(msg);
 	if (ret != LDB_SUCCESS) {
-		goto done;
+		return ret;
 	}
 
 	lmdb->meta->seqnum += 1;
-
-	ret = ldb_mdb_op_commit(lmdb, op);
-	if (ret != LDB_SUCCESS) {
-		goto done;
-	}
-	op = NULL;
-
-	ret = LDB_SUCCESS;
-done:
-	if (op != NULL) {
-		ldb_mdb_op_cancel(lmdb, op);
-	}
-	return ret;
+	return LDB_SUCCESS;
 }
 
 static void schema_unload(struct ldb_context *ldb,
@@ -258,7 +240,7 @@ static void schema_unload(struct ldb_context *ldb,
 }
 
 /* Unregister attribute handlers */
-void ldb_mdb_schema_unload(struct lmdb_private *lmdb)
+static void ldb_mdb_schema_unload(struct lmdb_private *lmdb)
 {
 	if (lmdb->meta->attributes == NULL) {
 		/* no previously loaded attributes */
@@ -429,7 +411,7 @@ int ldb_mdb_meta_load_op(struct lmdb_private *lmdb,
 /* Contrary to others, we can't rely on autotransaction here
  * FIXME - merge load and init, they always come together..
  */
-int ldb_mdb_meta_load(struct lmdb_private *lmdb)
+int ldb_mdb_meta_connect(struct lmdb_private *lmdb)
 {
 	int ret;
 	struct lmdb_db_op *op = NULL;
@@ -444,11 +426,16 @@ int ldb_mdb_meta_load(struct lmdb_private *lmdb)
 
 	op = ldb_mdb_op_start(lmdb);
 	if (op == NULL) {
-		return LDB_ERR_OPERATIONS_ERROR;
+		goto done;
 	}
 
 	ret = ldb_mdb_meta_load_op(lmdb, op);
-	if (ret != LDB_SUCCESS) {
+	if (ret == LDB_ERR_NO_SUCH_OBJECT) {
+		ret = ldb_mdb_baseinfo_init(lmdb, op);
+		if (ret != LDB_SUCCESS) {
+			goto done;
+		}
+	} else if (ret != LDB_SUCCESS) {
 		goto done;
 	}
 
@@ -466,12 +453,13 @@ int ldb_mdb_meta_load(struct lmdb_private *lmdb)
 
 	ret = LDB_SUCCESS;
 done:
+	if (op != NULL) {
+		ldb_mdb_op_cancel(lmdb, op);
+	}
+
 	if (in_transaction) {
 		lmdb_private_trans_cancel(lmdb);
 	}
 
-	if (op != NULL) {
-		ldb_mdb_op_cancel(lmdb, op);
-	}
 	return ret;
 }

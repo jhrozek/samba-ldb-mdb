@@ -67,7 +67,6 @@ int ldb_mdb_trans_prepare(struct ldb_tv_module *tv_mod);
 int ldb_mdb_trans_commit(struct ldb_tv_module *tv_mod);
 int ldb_mdb_trans_cancel(struct ldb_tv_module *tv_mod);
 
-int ldb_mdb_meta_load(struct lmdb_private *lmdb);
-int ldb_mdb_baseinfo_init(struct lmdb_private *lmdb);
+int ldb_mdb_meta_connect(struct lmdb_private *lmdb);
 
 #endif /* _LDB_MDB_PVT_H_ */
