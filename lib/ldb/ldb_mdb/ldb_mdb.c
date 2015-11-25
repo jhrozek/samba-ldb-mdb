@@ -32,6 +32,8 @@
 #define MDB_URL_PREFIX		"mdb://"
 #define MDB_URL_PREFIX_SIZE	(sizeof(MDB_URL_PREFIX)-1)
 
+#define MEGABYTE (1024*1024)
+
 static const struct ldb_tv_ops lmdb_ops = {
 	.search			= ldb_mdb_search_op,
 	.add			= ldb_mdb_add_op,
@@ -80,6 +82,12 @@ static struct lmdb_private *lmdb_pvt_create(TALLOC_CTX *mem_ctx,
 
 	/* Close when lmdb is released */
 	talloc_set_destructor(lmdb, lmdb_pvt_destructor);
+
+	ret = mdb_env_set_mapsize(lmdb->env, 100 * MEGABYTE);
+	if (ret != 0) {
+		talloc_free(lmdb);
+		return NULL;
+	}
 
 	/* MDB_NOSUBDIR implies there is a separate file called path and a
 	 * separate lockfile called path-lock
