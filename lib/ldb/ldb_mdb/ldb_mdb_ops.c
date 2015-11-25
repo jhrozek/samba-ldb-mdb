@@ -27,6 +27,7 @@
 #include "ldb_tev_wrap.h"
 #include "ldb_mdb_pvt.h"
 #include "ldb_mdb_util.h"
+#include "ldb_mdb_index.h"
 
 /* Transaction API to be used by LDB users. Hooks into the ldb_tv_
  * interface
@@ -214,6 +215,22 @@ static int keyval_matches(struct ldb_context *ldb,
 	return LDB_ERR_COMPARE_TRUE;
 }
 
+static struct ldb_val *basedn_candidate_list(TALLOC_CTX *mem_ctx,
+					     const char *basedn)
+{
+	struct ldb_val *dnlist;
+
+	dnlist = talloc_array(mem_ctx, struct ldb_val, 1);
+	if (dnlist == NULL) {
+		return NULL;
+	}
+
+	dnlist[0].data = (uint8_t *) basedn;
+	dnlist[0].length = strlen((char *) dnlist[0].data);
+
+	return dnlist;
+}
+
 int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 		      struct ldb_request *req,
 		      struct ldb_search *search)
@@ -228,6 +245,8 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 	MDB_val mdb_val;
 	MDB_cursor *cursor = NULL;
 	struct lmdb_db_op *op = NULL;
+	struct ldb_val *candidate_dn_list = NULL;
+	size_t returned_entries = 0;
 
 	ldb = ldb_tv_get_ldb_ctx(tv_mod);
 	lmdb = ldb_tv_get_mod_data(tv_mod);
@@ -244,7 +263,29 @@ int ldb_mdb_search_op(struct ldb_tv_module *tv_mod,
 
 	ret = ldb_mdb_meta_load_op(lmdb, op);
 	if (ret != LDB_SUCCESS) {
-		return ret;
+		goto done;
+	}
+
+	if (search->scope == LDB_SCOPE_BASE) {
+		candidate_dn_list = basedn_candidate_list(req,
+						ldb_dn_get_linearized(search->base));
+	}
+
+	if (candidate_dn_list != NULL) {
+		ret = ldb_mdb_filter_candidate_list(ldb, req, op,
+						    search, candidate_dn_list,
+						    &returned_entries);
+		if (ret == LDB_SUCCESS) {
+			/* Great, indexing matched */
+			goto done;
+		} else if (returned_entries > 0) {
+			/* Something wrong happened, but we already returned entries
+			 * to the caller, bail out
+			 */
+			goto done;
+		}
+
+		/* Error before sending entries to the caller, continue */
 	}
 
 	/* FIXME - might not need cursor at all. Might just use mdb_get. Need to
