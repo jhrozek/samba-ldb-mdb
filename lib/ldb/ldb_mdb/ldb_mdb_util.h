@@ -88,8 +88,6 @@ int ldb_mdb_msg_get(TALLOC_CTX *mem_ctx,
 int lmdb_private_trans_start(struct lmdb_private *lmdb);
 int lmdb_private_trans_commit(struct lmdb_private *lmdb);
 int lmdb_private_trans_cancel(struct lmdb_private *lmdb);
-struct lmdb_trans *lmdb_private_trans_head(struct lmdb_private *lmdb);
-MDB_txn *lmdb_trans_get_tx(struct lmdb_trans *ltx);
 
 /* internal DB operation API */
 MDB_dbi lmdb_db_op_get_handle(struct lmdb_db_op *op);

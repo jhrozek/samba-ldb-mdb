@@ -1,7 +1,7 @@
 /*
    ldb database library using mdb back end - internal records
 
-   Copyright (C) Jakub Hrozek 2014
+   Copyright (C) Jakub Hrozek 2015
 
      ** NOTE! The following LGPL license applies to the ldb
      ** library. This does NOT imply that all of Samba is released
@@ -426,10 +426,21 @@ int ldb_mdb_meta_load_op(struct lmdb_private *lmdb,
 	return LDB_SUCCESS;
 }
 
+/* Contrary to others, we can't rely on autotransaction here
+ * FIXME - merge load and init, they always come together..
+ */
 int ldb_mdb_meta_load(struct lmdb_private *lmdb)
 {
 	int ret;
 	struct lmdb_db_op *op = NULL;
+	bool in_transaction;
+
+	in_transaction = false;
+	ret = lmdb_private_trans_start(lmdb);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+	in_transaction = true;
 
 	op = ldb_mdb_op_start(lmdb);
 	if (op == NULL) {
@@ -447,8 +458,18 @@ int ldb_mdb_meta_load(struct lmdb_private *lmdb)
 	}
 	op = NULL;
 
+	ret = lmdb_private_trans_commit(lmdb);
+	if (ret != LDB_SUCCESS) {
+		goto done;
+	}
+	in_transaction = false;
+
 	ret = LDB_SUCCESS;
 done:
+	if (in_transaction) {
+		lmdb_private_trans_cancel(lmdb);
+	}
+
 	if (op != NULL) {
 		ldb_mdb_op_cancel(lmdb, op);
 	}

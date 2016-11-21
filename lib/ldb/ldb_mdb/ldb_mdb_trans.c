@@ -51,6 +51,15 @@ struct lmdb_trans {
 	struct lmdb_db_op *db_op;
 };
 
+static MDB_txn *lmdb_trans_get_tx(struct lmdb_trans *ltx)
+{
+	if (ltx == NULL) {
+		return NULL;
+	}
+
+	return ltx->tx;
+}
+
 static void trans_push(struct lmdb_private *lmdb, struct lmdb_trans *ltx)
 {
 	if (lmdb->txlist) {
@@ -75,7 +84,7 @@ static int ldb_mdb_trans_destructor(struct lmdb_trans *ltx)
 	return 0;
 }
 
-struct lmdb_trans *lmdb_private_trans_head(struct lmdb_private *lmdb)
+static struct lmdb_trans *lmdb_private_trans_head(struct lmdb_private *lmdb)
 {
 	struct lmdb_trans *ltx;
 
@@ -156,15 +165,6 @@ int lmdb_private_trans_cancel(struct lmdb_private *lmdb)
 	mdb_txn_abort(ltx->tx);
 	trans_finished(lmdb, ltx);
 	return LDB_SUCCESS;
-}
-
-MDB_txn *lmdb_trans_get_tx(struct lmdb_trans *ltx)
-{
-	if (ltx == NULL) {
-		return NULL;
-	}
-
-	return ltx->tx;
 }
 
 static int lmdb_named_db_op_start(struct lmdb_trans *ltx,
@@ -254,23 +254,14 @@ struct lmdb_db_op *ldb_mdb_op_start(struct lmdb_private *lmdb)
 	int ret;
 	struct lmdb_trans *ltx;
 
-	ret = lmdb_private_trans_start(lmdb);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot start transaction\n");
-		return NULL;
-	}
-
 	ltx = lmdb_private_trans_head(lmdb);
 	if (ltx == NULL) {
-		/* Huh? Try to roll back..*/
-		lmdb_private_trans_cancel(lmdb);
 		return NULL;
 	}
 
 	ret = lmdb_named_db_op_start(ltx, NULL, 0);
 	if (ret != LDB_SUCCESS) {
 		ldb_asprintf_errstring(lmdb->ldb, "Cannot start db operation\n");
-		lmdb_private_trans_cancel(lmdb);
 		return NULL;
 	}
 
@@ -285,14 +276,6 @@ int ldb_mdb_op_commit(struct lmdb_private *lmdb,
 	ret = lmdb_db_op_finish(op);
 	if (ret != LDB_SUCCESS) {
 		ldb_asprintf_errstring(lmdb->ldb, "Cannot finish db operation\n");
-		lmdb_private_trans_cancel(lmdb);
-		return ret;
-	}
-
-	ret = lmdb_private_trans_commit(lmdb);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot commit db transaction\n");
-		lmdb_private_trans_cancel(lmdb);
 		return ret;
 	}
 
@@ -307,13 +290,6 @@ int ldb_mdb_op_cancel(struct lmdb_private *lmdb,
 	ret = lmdb_db_op_finish(op);
 	if (ret != LDB_SUCCESS) {
 		ldb_asprintf_errstring(lmdb->ldb, "Cannot finish db operation\n");
-		lmdb_private_trans_cancel(lmdb);
-		return ret;
-	}
-
-	ret = lmdb_private_trans_cancel(lmdb);
-	if (ret != LDB_SUCCESS) {
-		ldb_asprintf_errstring(lmdb->ldb, "Cannot cancel db transaction\n");
 		return ret;
 	}
 
